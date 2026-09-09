@@ -1,0 +1,127 @@
+# ==========================================
+# Python & Environment
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Distribution & Build outputs
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py:annot
+htmlcov/
+.tox/
+.nox/
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+
+# ==========================================
+# Node.js & React / Vite Frontend
+# ==========================================
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+.vite/
+frontend/.vite/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ==========================================
+# Data Files & ECG Datasets (PhysioNet / WFDB)
+# ==========================================
+mitdb/
+data/
+uploads/
+temp/
+tmp/
+*.dat
+*.hea
+*.atr
+*.mat
+
+# ==========================================
+# Environment & Secrets
+# ==========================================
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+!.env.example
+
+# ==========================================
+# Operating System Files
+# ==========================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ==========================================
+# IDE & Editor Settings
+# ==========================================
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+*.swo
+*~
