@@ -125,3 +125,7 @@ $RECYCLE.BIN/
 *.swp
 *.swo
 *~
+
+
+.vscode/
+prompt.md
