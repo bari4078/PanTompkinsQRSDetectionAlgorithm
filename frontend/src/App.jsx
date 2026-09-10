@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import Plot from 'react-plotly.js';
 import { Activity, Heart, ActivitySquare, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { usePlaybackEngine } from './playback/usePlaybackEngine';
-import HeartVisualizer from './components/HeartVisualizer/HeartVisualizer';
+import { Canvas } from '@react-three/fiber';
+import { OrbitControls } from '@react-three/drei';
+import HeartModel from './HeartModel';
 import PlaybackControls from './components/Playback/PlaybackControls';
 import PlaybackStats from './components/Playback/PlaybackStats';
 import './index.css';
@@ -205,15 +207,37 @@ function App() {
               </div>
             </div>
 
-            {/* SVG Heart Visualizer — replaces Three.js 3D model */}
-            <div className="card" style={{ padding: '1rem', overflow: 'hidden', position: 'relative' }}>
-              <div style={{ position: 'absolute', top: '10px', left: '10px', zIndex: 10, fontSize: '0.8rem', fontWeight: 600, color: '#fbbf24', textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>
-                Cardiac Conduction
+            {/* 3D HEART VIEWER */}
+            <div className="card" style={{ padding: 0, height: '340px', overflow: 'hidden', position: 'relative' }}>
+              <div style={{ position: 'absolute', top: '10px', left: '10px', zIndex: 10, display: 'flex', alignItems: 'center', gap: '8px', pointerEvents: 'none' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#fbbf24', textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>
+                  Live 3D Conduction
+                </span>
+                {/* <span style={{ fontSize: '0.68rem', color: '#38bdf8', background: 'rgba(15,23,42,0.85)', padding: '2px 8px', borderRadius: '9999px', border: '1px solid rgba(56,189,248,0.35)' }}>
+                  Anatomical Landmarks
+                </span> */}
               </div>
-              <HeartVisualizer
-                phase={playbackState.phase}
-                progress={playbackState.phaseProgress}
-              />
+              <div style={{ position: 'absolute', bottom: '8px', right: '10px', zIndex: 10, fontSize: '0.7rem', color: '#94a3b8', background: 'rgba(15,23,42,0.7)', padding: '2px 8px', borderRadius: '4px', pointerEvents: 'none' }}>
+                Drag to rotate • Scroll to zoom
+              </div>
+              <Canvas camera={{ position: [0, 0, 4.2], fov: 45 }}>
+                <ambientLight intensity={1.2} />
+                <directionalLight position={[5, 10, 7]} intensity={1.8} />
+                <directionalLight position={[-5, -5, -3]} intensity={0.8} />
+                <pointLight position={[0, 2, 4]} intensity={1.2} color="#ffffff" />
+                <Suspense fallback={
+                  <mesh>
+                    <sphereGeometry args={[0.7, 16, 16]} />
+                    <meshStandardMaterial color="#b91c1c" wireframe transparent opacity={0.3} />
+                  </mesh>
+                }>
+                  <HeartModel
+                    phase={playbackState.phase || 'diastole'}
+                    progress={playbackState.phaseProgress || 0}
+                  />
+                </Suspense>
+                <OrbitControls enableZoom={true} autoRotate={!playbackState.isPlaying} autoRotateSpeed={0.8} />
+              </Canvas>
             </div>
           </div>
 
