@@ -108,7 +108,7 @@ function ConductionLabel({ position, text, subtext, active, activeColor = '#38bd
         />
         <span
           style={{
-            fontSize: '11px',
+            fontSize: '7px',
             fontWeight: active ? 700 : 500,
             color: active ? activeColor : '#f1f5f9',
             letterSpacing: '0.02em',
@@ -119,7 +119,7 @@ function ConductionLabel({ position, text, subtext, active, activeColor = '#38bd
         {subtext && (
           <span
             style={{
-              fontSize: '9px',
+              fontSize: '5px',
               color: '#94a3b8',
               marginLeft: '2px',
             }}

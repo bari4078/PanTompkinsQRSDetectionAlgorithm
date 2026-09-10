@@ -10,7 +10,7 @@ export default function CardiacNodes({ phase, progress }) {
   // (Prompt initially suggested 280, 105 but also said RA is left. Using 120, 105 to match anatomy rules)
   const saX = 120;
   const saY = 105;
-  
+
   // AV Node position: X=200, Y=220 (center)
   const avX = 200;
   const avY = 220;
@@ -26,7 +26,7 @@ export default function CardiacNodes({ phase, progress }) {
     const coreRadius = baseRadius + activePulse * 2;
     const glowRadius = 12 + activePulse * 8;
     const glowOpacity = activePulse * 0.6;
-    
+
     return (
       <g>
         {/* Glow circle */}
@@ -54,7 +54,7 @@ export default function CardiacNodes({ phase, progress }) {
           x={x + labelOffset}
           y={y + 4}
           fill="#fbbf24"
-          fontSize="11"
+          fontSize="7"
           fontWeight="600"
         >
           {label}
