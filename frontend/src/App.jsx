@@ -793,7 +793,9 @@ function App() {
           style={{
             ...cardStyle,
             padding: '0.85rem 0.8rem',
-            alignSelf: 'stretch',
+            alignSelf: 'start',
+            position: 'sticky',
+            top: '1.15rem',
             display: 'flex',
             flexDirection: 'column',
             gap: '0.45rem',
@@ -1861,10 +1863,12 @@ function App() {
           style={{
             ...cardStyle,
             padding: 0,
-            position: 'relative',
+            position: 'sticky',
+            top: '1.15rem',
+            alignSelf: 'start',
+            height: '580px',
+            maxHeight: 'calc(100vh - 2.5rem)',
             overflow: 'hidden',
-            minHeight: 0,
-            height: '100%',
             display: 'flex',
             flexDirection: 'column',
           }}
@@ -1959,9 +1963,15 @@ function App() {
             grid-template-columns: minmax(200px, 220px) minmax(0, 1fr) !important;
           }
 
+          .dashboard-grid > aside {
+            position: static !important;
+          }
+
           .dashboard-grid > section:last-child {
             grid-column: 1 / -1;
-            min-height: 600px;
+            height: 560px !important;
+            min-height: 560px !important;
+            position: static !important;
           }
         }
 
@@ -1977,7 +1987,8 @@ function App() {
 
           .dashboard-grid > section:last-child {
             grid-column: auto;
-            min-height: 560px;
+            height: 520px !important;
+            min-height: 520px !important;
           }
 
           .metrics-grid {
