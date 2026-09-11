@@ -21,7 +21,6 @@ export function usePlaybackEngine({ fs, rPeaks, duration }) {
   useEffect(() => {
     engineRef.current = new PlaybackEngine({ fs, rPeaks, duration });
     setState(engineRef.current.getState());
-  }, [fs, rPeaks, duration]);
   }, [fs, rPeaksKey, duration]);
 
   const tick = useCallback((timestamp) => {

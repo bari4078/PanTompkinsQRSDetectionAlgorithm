@@ -1,3 +1,4 @@
+from typing import List, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -7,6 +8,7 @@ from data_loader import DataLoader
 from pan_tompkins.detector import PanTompkinsDetector
 from delineation.qrs_delineator import QRSDelineator
 from analysis import analyze_ecg
+from evaluation.evaluator import evaluate_records_batch, PAPER_REFERENCE
 
 app = FastAPI(title="Pan-Tompkins API", description="API for ECG Processing and Analysis")
 
@@ -104,6 +106,43 @@ def process_record(req: ProcessRequest):
     except Exception as e:
         # Return a 500 Internal Server Error if something goes wrong (e.g. invalid record)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class EvaluationRequest(BaseModel):
+    record_ids: Optional[List[str]] = None
+    tolerance_ms: float = 150.0
+    duration_sec: Optional[float] = 60.0
+    window_size_ms: int = 150
+    lowcut: float = 5.0
+    highcut: float = 15.0
+
+
+@app.post("/api/evaluate")
+def evaluate_records_endpoint(req: EvaluationRequest):
+    """
+    Evaluates the Pan-Tompkins QRS detector against ground-truth MIT-BIH reference
+    annotations using deterministic minimum-cost bipartite matching under ANSI/AAMI EC57.
+    """
+    try:
+        # If no specific record_ids provided, evaluate all available records discovered dynamically
+        if not req.record_ids:
+            records_to_eval = data_loader.get_available_records()
+        else:
+            records_to_eval = req.record_ids
+
+        result = evaluate_records_batch(
+            record_ids=records_to_eval,
+            data_loader=data_loader,
+            tolerance_ms=req.tolerance_ms,
+            duration_sec=req.duration_sec,
+            window_size_ms=req.window_size_ms,
+            lowcut=req.lowcut,
+            highcut=req.highcut,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     # Run the server when this script is executed directly

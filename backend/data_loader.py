@@ -57,6 +57,54 @@ class DataLoader:
         """
         Returns a hardcoded list of common MIT-BIH records.
         This provides options for the user in the UI dropdown.
+        Returns a list of available MIT-BIH records dynamically discovered
+        from the local data directory, supplemented with common MIT-BIH record IDs.
         """
         return ['100', '101', '103', '105', '111', '113', '117', '119', '121',
                 '200', '201', '205', '212', '213', '219', '222', '230']
+        discovered = set()
+        if os.path.exists(self.data_dir):
+            for fname in os.listdir(self.data_dir):
+                if fname.endswith('.dat') or fname.endswith('.hea') or fname.endswith('.atr'):
+                    base = os.path.splitext(fname)[0]
+                    # Valid MIT-BIH record names are numeric (e.g., '100', '201')
+                    if base.isdigit():
+                        discovered.add(base)
+
+        default_records = [
+            '100', '101', '103', '105', '111', '113', '117', '119', '121',
+            '200', '201', '205', '212', '213', '219', '222', '230'
+        ]
+        all_records = sorted(list(discovered.union(default_records)), key=lambda x: int(x) if x.isdigit() else x)
+        return all_records
+
+    def load_record_and_annotations(self, record_name='100', sampto=None):
+        """
+        Loads ECG signal, sampling frequency, and reference annotations for a record.
+        Ensures local availability via PhysioNet download if missing.
+
+        Args:
+            record_name (str): The name of the record (e.g. '100', '119')
+            sampto (int, optional): Maximum sample index to load
+
+        Returns:
+            signal (np.ndarray): 1D array of the lead 0 ECG signal
+            fs (int): Sampling frequency
+            annotation (wfdb.Annotation): Reference annotation object containing sample and symbol arrays
+        """
+        record_path = os.path.join(self.data_dir, record_name)
+
+        # Download from 'mitdb' if .dat, .hea, or .atr is missing locally
+        if not (os.path.exists(record_path + '.dat') and os.path.exists(record_path + '.atr')):
+            print(f"Downloading record {record_name} and annotations from PhysioNet...")
+            wfdb.dl_database('mitdb', self.data_dir, records=[record_name])
+
+        # Read the record
+        record = wfdb.rdrecord(record_path, sampto=sampto)
+        signal = record.p_signal[:, 0]
+        fs = record.fs
+
+        # Read the reference annotation
+        annotation = wfdb.rdann(record_path, 'atr', sampfrom=0, sampto=sampto)
+
+        return signal, fs, annotation
