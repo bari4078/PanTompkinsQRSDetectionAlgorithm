@@ -58,7 +58,8 @@ export default function PlaybackStats({ state = {}, duration = 0, totalBeats = 0
 
   // Phase: convert snake_case to Title Case, show progress as a small inline bar + percentage
   const formattedPhaseName = formatPhase(phase);
-  const progressPercent = Math.min(100, Math.max(0, Math.round((phaseProgress || 0) * 100)));
+  const progressRatio = Math.min(100, Math.max(0, (phaseProgress || 0) * 100));
+  const progressPercent = Math.round(progressRatio);
 
   return (
     <div
@@ -159,11 +160,11 @@ export default function PlaybackStats({ state = {}, duration = 0, totalBeats = 0
           >
             <div
               style={{
-                width: `${progressPercent}%`,
+                width: `${progressRatio}%`,
                 height: '100%',
                 background: '#3b82f6',
                 borderRadius: '3px',
-                transition: 'width 0.1s linear',
+                transition: 'none',
               }}
             />
           </div>

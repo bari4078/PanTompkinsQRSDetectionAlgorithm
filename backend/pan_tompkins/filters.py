@@ -10,7 +10,7 @@ class FilterStrategy:
     def apply(self, signal, fs):
         """
         Applies the filter to the signal.
-        
+
         Args:
             signal (np.array): The input ECG signal.
             fs (int): The sampling frequency.
@@ -35,10 +35,10 @@ class BandpassFilter(FilterStrategy):
         nyquist = 0.5 * fs
         low = self.lowcut / nyquist
         high = self.highcut / nyquist
-        
+
         # Create a Butterworth bandpass filter
         b, a = butter(self.order, [low, high], btype='band')
-        
+
         # Apply the filter to the signal
         return lfilter(b, a, signal)
 
@@ -52,11 +52,13 @@ class DerivativeFilter(FilterStrategy):
     def apply(self, signal, fs):
         # The standard Pan-Tompkins derivative filter coefficients:
         # y[n] = (1/8T) * (-x[n-2] - 2x[n-1] + 2x[n+1] + x[n+2])
-        # We can implement this using a simple convolution.
-        
-        h_d = [-1/8, -2/8, 0, 2/8, 1/8] 
+        # In np.convolve, the kernel is flipped during computation.
+        # Therefore, h_d = [1/8, 2/8, 0, -2/8, -1/8] yields:
+        # -x[n-2]/8 - 2x[n-1]/8 + 0 + 2x[n+1]/8 + x[n+2]/8
+
+        h_d = [1/8, 2/8, 0, -2/8, -1/8]
         derivative = np.convolve(signal, h_d, mode='same')
-        
+
         # Multiply by fs to account for the (1/T) factor
         return derivative * fs
 
@@ -85,14 +87,14 @@ class MovingWindowIntegration(FilterStrategy):
     def apply(self, signal, fs):
         # Convert window size from milliseconds to number of samples
         window_size = int((self.window_size_ms / 1000.0) * fs)
-        
+
         # Ensure window_size is at least 1
         if window_size < 1:
             window_size = 1
-            
+
         # Create a window of evenly distributed weights
         window = np.ones(window_size) / window_size
-        
+
         # Apply convolution to perform the moving average
         integrated = np.convolve(signal, window, mode='same')
         return integrated

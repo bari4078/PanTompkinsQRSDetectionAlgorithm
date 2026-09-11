@@ -13,7 +13,7 @@ class BandpassFilter(FilterStrategy):
         nyquist = 0.5 * fs
         low = self.lowcut / nyquist
         high = self.highcut / nyquist
-        
+
         b, a = butter(self.order, [low, high], btype='band')
         return lfilter(b, a, signal)
 ```
@@ -29,7 +29,7 @@ class BandpassFilter(FilterStrategy):
 ```python
 class DerivativeFilter(FilterStrategy):
     def apply(self, signal, fs):
-        h_d = [-1/8, -2/8, 0, 2/8, 1/8] 
+        h_d = [-1/8, -2/8, 0, 2/8, 1/8]
         derivative = np.convolve(signal, h_d, mode='same')
         return derivative * fs
 ```
@@ -50,18 +50,23 @@ class MovingWindowIntegration(FilterStrategy):
         return integrated
 ```
 * **`window_size = int((self.window_size_ms / 1000.0) * fs)`**: We convert our window size from milliseconds (e.g., 150ms) to seconds (0.15s), and then multiply by the sampling frequency to figure out how many "data points" (samples) make up that window.
-* **`window = np.ones(window_size) / window_size`**: This creates an array of 1s, and divides each by the total size. E.g., if the size is 5, the array is `[0.2, 0.2, 0.2, 0.2, 0.2]`. 
+* **`window = np.ones(window_size) / window_size`**: This creates an array of 1s, and divides each by the total size. E.g., if the size is 5, the array is `[0.2, 0.2, 0.2, 0.2, 0.2]`.
 * **`np.convolve(signal, window, mode='same')`**: When you convolve a signal with an array of equal fractions like the one above, it mathematically performs a "Moving Average." It averages all the points within the window, smoothing out the signal.
 
 ---
 
-## 4. Peak Detection (in `detector.py`)
+## 4. Adaptive Detection & Decision Rules (in `detector.py`)
 
 ```python
-threshold = np.mean(integrated_sig) + 0.5 * np.std(integrated_sig)
-min_distance = int(0.3 * fs) 
-peaks, _ = find_peaks(integrated_sig, height=threshold, distance=min_distance)
+# Dual adaptive thresholding
+th_i1 = npki + 0.25 * (spki - npki)
+th_i2 = 0.5 * th_i1
+th_f1 = npkf + 0.25 * (spkf - npkf)
+th_f2 = 0.5 * th_f1
 ```
-* **`threshold = np.mean(...) + 0.5 * np.std(...)`**: We calculate the average (mean) height of the integrated signal, and add half of its standard deviation (how spread out the data is). This creates a dynamic horizontal line.
-* **`min_distance = int(0.3 * fs)`**: 0.3 seconds is the minimum time between heartbeats (max 200 beats per minute). We multiply by `fs` to convert this to data points.
-* **`find_peaks(...)`**: This SciPy function sweeps through the signal. It finds local maximums that are higher than our `threshold`, ensuring they are at least `min_distance` apart from each other. It returns the indices (positions) of these peaks.
+* **Dual Signal Path**: Tracks signal and noise peak levels on both the moving-window integrated signal (`SPKI`, `NPKI`) and bandpass-filtered signal (`SPKF`, `NPKF`).
+* **Dual Thresholds**: Primary thresholds (`THRESHOLD_I1`, `THRESHOLD_F1`) and secondary search-back thresholds (`THRESHOLD_I2`, `THRESHOLD_F2`).
+* **200 ms Refractory Period**: Physiologically blanks candidate peaks occurring within 200 ms of a confirmed QRS.
+* **T-Wave Discrimination**: Compares derivative slope for candidate peaks within 200–360 ms. If candidate slope < 0.5 × previous QRS slope, it is rejected as a T-wave.
+* **Search-Back**: If no QRS is detected within 166% of `RR_AVERAGE2`, the algorithm searches back for missed peaks exceeding the secondary thresholds (`THRESHOLD_I2` and `THRESHOLD_F2`).
+* **RR Interval Adaptation**: Continuously tracks `RR_AVERAGE1` (recent 8 beats) and `RR_AVERAGE2` (acceptable 8 beats between 92% and 116% limits).

@@ -9,6 +9,7 @@ import {
   BookOpen,
   Settings,
   Maximize2,
+  Cpu,
 } from 'lucide-react';
 import { usePlaybackEngine } from './playback/usePlaybackEngine';
 import { Canvas } from '@react-three/fiber';
@@ -108,21 +109,22 @@ function App() {
         y: signalData,
         type: 'scatter',
         mode: 'lines',
-        name: 'ECG Signal',
+        name: `${activeStage.charAt(0).toUpperCase() + activeStage.slice(1)}`,
         line: { color: '#3b82f6', width: 2 },
       },
     ];
 
     if (activeStage === 'original' && data.stages.peaks_original) {
-      const peakTimes = data.stages.peaks_original.map((p) => p / fs);
-      const peakValues = data.stages.peaks_original.map((p) => signalData[p]);
+      const searchbackSet = new Set(data.stages.searchback || []);
+      const normalPeaks = data.stages.peaks_original.filter((p) => !searchbackSet.has(p));
+      const sbPeaks = data.stages.peaks_original.filter((p) => searchbackSet.has(p));
 
       plotData.push({
-        x: peakTimes,
-        y: peakValues,
+        x: normalPeaks.map((p) => p / fs),
+        y: normalPeaks.map((p) => signalData[p]),
         type: 'scatter',
         mode: 'markers',
-        name: 'Detected R-Peaks',
+        name: 'Detected QRS (Normal)',
         marker: {
           color: '#ef4444',
           size: 10,
@@ -130,7 +132,96 @@ function App() {
           line: { width: 2 },
         },
       });
+
+      if (sbPeaks.length > 0) {
+        plotData.push({
+          x: sbPeaks.map((p) => p / fs),
+          y: sbPeaks.map((p) => signalData[p]),
+          type: 'scatter',
+          mode: 'markers',
+          name: 'Search-Back QRS',
+          marker: {
+            color: '#f59e0b',
+            size: 12,
+            symbol: 'diamond',
+            line: { width: 2 },
+          },
+        });
+      }
+    } else if (activeStage === 'integrated') {
+      if (data.stages.threshold_i1) {
+        plotData.push({
+          x: timeAxis,
+          y: data.stages.threshold_i1,
+          type: 'scatter',
+          mode: 'lines',
+          name: 'Threshold I1 (Primary)',
+          line: { color: '#f59e0b', width: 2 },
+        });
+      }
+      if (data.stages.threshold_i2) {
+        plotData.push({
+          x: timeAxis,
+          y: data.stages.threshold_i2,
+          type: 'scatter',
+          mode: 'lines',
+          name: 'Threshold I2 (Search-back)',
+          line: { color: '#fbbf24', width: 1.5, dash: 'dash' },
+        });
+      }
+      if (data.stages.peaks_integrated && data.stages.peaks_integrated.length > 0) {
+        plotData.push({
+          x: data.stages.peaks_integrated.map((p) => p / fs),
+          y: data.stages.peaks_integrated.map((p) => signalData[p]),
+          type: 'scatter',
+          mode: 'markers',
+          name: 'Integrated QRS Peaks',
+          marker: {
+            color: '#10b981',
+            size: 8,
+            symbol: 'circle',
+          },
+        });
+      }
+      if (data.stages.rejected_t_waves && data.stages.rejected_t_waves.length > 0) {
+        plotData.push({
+          x: data.stages.rejected_t_waves.map((p) => p / fs),
+          y: data.stages.rejected_t_waves.map((p) => signalData[p]),
+          type: 'scatter',
+          mode: 'markers',
+          name: 'Rejected T-Waves',
+          marker: {
+            color: '#c084fc',
+            size: 9,
+            symbol: 'x',
+          },
+        });
+      }
+    } else if (activeStage === 'bandpass') {
+      if (data.stages.threshold_f1) {
+        plotData.push({
+          x: timeAxis,
+          y: data.stages.threshold_f1,
+          type: 'scatter',
+          mode: 'lines',
+          name: 'Threshold F1 (Primary)',
+          line: { color: '#f59e0b', width: 2 },
+        });
+      }
+      if (data.stages.threshold_f2) {
+        plotData.push({
+          x: timeAxis,
+          y: data.stages.threshold_f2,
+          type: 'scatter',
+          mode: 'lines',
+          name: 'Threshold F2 (Search-back)',
+          line: { color: '#fbbf24', width: 1.5, dash: 'dash' },
+        });
+      }
     }
+
+    const hasMultiTraces = ['integrated', 'bandpass'].includes(activeStage) ||
+      (activeStage === 'original' && (data.stages.searchback?.length > 0));
 
     return (
       <div
@@ -162,7 +253,14 @@ function App() {
               zerolinecolor: '#334155',
               fixedrange: true,
             },
-            showlegend: false,
+            showlegend: hasMultiTraces,
+            legend: {
+              orientation: 'h',
+              x: 0,
+              y: 1.14,
+              font: { color: '#94a3b8', size: 10 },
+              bgcolor: 'rgba(15,23,42,0.6)',
+            },
           }}
           useResizeHandler={true}
           style={{ width: '100%', height: '100%' }}
@@ -427,12 +525,12 @@ function App() {
             gap: '1.15rem',
           }}
         >
-          {/* 3 compact metric cards in ONE row */}
+          {/* 4 compact metric cards in ONE row */}
           <div
             className="metrics-grid"
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+              gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
               gap: '0.85rem',
               margin: 0,
             }}
@@ -522,6 +620,57 @@ function App() {
                     Waiting for data...
                   </div>
                 )}
+              </div>
+            </div>
+
+            <div
+              className="metric-card"
+              style={{
+                ...cardStyle,
+                minHeight: 100,
+                padding: '1.05rem 1rem',
+                textAlign: 'left',
+              }}
+            >
+              <div
+                className="metric-label"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                }}
+              >
+                <Cpu size={14} color="#f59e0b" />
+                PAN-TOMPKINS STATS
+              </div>
+              <div
+                style={{
+                  marginTop: '0.45rem',
+                  fontSize: '0.78rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.22rem',
+                  color: 'var(--text-secondary, #cbd5e1)',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>QRS Beats:</span>
+                  <strong style={{ color: '#10b981' }}>
+                    {data?.stages?.detected_peaks?.length || '--'}
+                  </strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Search-back Beats:</span>
+                  <strong style={{ color: '#f59e0b' }}>
+                    {data?.stages?.searchback?.length || 0}
+                  </strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Rejected T-Waves:</span>
+                  <strong style={{ color: '#c084fc' }}>
+                    {data?.stages?.rejected_t_waves?.length || 0}
+                  </strong>
+                </div>
               </div>
             </div>
           </div>

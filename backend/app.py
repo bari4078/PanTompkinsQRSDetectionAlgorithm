@@ -42,30 +42,49 @@ def process_record(req: ProcessRequest):
     try:
         # 1. Load data
         signal, fs = data_loader.download_and_load(req.record_id)
-        
+
         # Limit to the first 10 seconds for fast UI responsiveness and clear visualization.
         # Plotting 30 minutes of data at 360Hz would crash the browser.
         duration_sec = 10
         signal = signal[:int(fs * duration_sec)]
-        
+
         # 2. Initialize the detector with dynamic parameters from the UI
         detector = PanTompkinsDetector(
             window_size_ms=req.window_size_ms,
             filter_lowcut=req.lowcut,
             filter_highcut=req.highcut
         )
-        
+
         # 3. Process the signal
         stages = detector.process(signal, fs)
-        
+
         # 4. Analyze the detected peaks for advanced metrics
         analysis = analyze_ecg(stages['peaks_original'], fs)
-        
+
         # Return everything as JSON
+        metadata = {
+            "detected_peaks": stages["detected_peaks"],
+            "detection_method": stages["detection_method"],
+            "searchback": stages["searchback"],
+            "rr_intervals": stages["rr_intervals"],
+            "rr_average_1": stages["rr_average_1"],
+            "rr_average_2": stages["rr_average_2"],
+            "spki": stages["spki"],
+            "npki": stages["npki"],
+            "spkf": stages["spkf"],
+            "npkf": stages["npkf"],
+            "threshold_i1": stages["threshold_i1"],
+            "threshold_i2": stages["threshold_i2"],
+            "threshold_f1": stages["threshold_f1"],
+            "threshold_f2": stages["threshold_f2"],
+            "refractory_intervals": stages["refractory_intervals"],
+            "rejected_t_waves": stages["rejected_t_waves"]
+        }
         return {
             "fs": fs,
             "stages": stages,
-            "analysis": analysis
+            "analysis": analysis,
+            "metadata": metadata
         }
     except Exception as e:
         # Return a 500 Internal Server Error if something goes wrong (e.g. invalid record)
