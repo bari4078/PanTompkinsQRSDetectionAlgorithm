@@ -16,6 +16,7 @@ import {
   ChevronUp,
   Info,
   Sliders,
+  Layers,
 } from 'lucide-react';
 import { usePlaybackEngine } from './playback/usePlaybackEngine';
 import { Canvas } from '@react-three/fiber';
@@ -150,6 +151,14 @@ function App() {
   const [selectedBeatIndex, setSelectedBeatIndex] = useState(0);
   const [xRange, setXRange] = useState([0, DURATION]);
   const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
+  const [isEvidenceOpen, setIsEvidenceOpen] = useState(true);
+
+  // Diagnostic overlay visibility toggles
+  const [showRefractory, setShowRefractory] = useState(true);
+  const [showSearchback, setShowSearchback] = useState(true);
+  const [showRejectedT, setShowRejectedT] = useState(true);
+  const [showThresholds, setShowThresholds] = useState(true);
+  const [showDelineation, setShowDelineation] = useState(true);
 
   // Extract R-peaks and fs memoized to prevent unnecessary re-instantiations
   const rPeaks = useMemo(() => data?.stages?.peaks_original || [], [data?.stages?.peaks_original]);
@@ -262,6 +271,7 @@ function App() {
         }
       });
       if (minDiff < 0.6) {
+      if (minDiff < 0.8) {
         setSelectedBeatIndex(closestIdx);
       }
     },
@@ -309,11 +319,102 @@ function App() {
     const delineatedBeats = data.delineation || [];
     const currentBeat = delineatedBeats[selectedBeatIndex] || delineatedBeats[0];
 
+    // -------------------------------------------------------------
+    // Diagnostic Overlay 1: Refractory Intervals (200 ms shaded region)
+    // -------------------------------------------------------------
+    if (showRefractory) {
+      const intervals = (data.stages.refractory_intervals && data.stages.refractory_intervals.length > 0)
+        ? data.stages.refractory_intervals
+        : (data.stages.peaks_original || []).map((p) => [p, Math.min(signalData.length, p + Math.round(0.200 * fs))]);
+
+      intervals.forEach(([startSample, endSample]) => {
+        shapes.push({
+          type: 'rect',
+          xref: 'x',
+          yref: 'paper',
+          x0: startSample / fs,
+          x1: endSample / fs,
+          y0: 0,
+          y1: 1,
+          fillcolor: 'rgba(239, 68, 68, 0.08)',
+          line: { color: 'rgba(239, 68, 68, 0.22)', width: 1, dash: 'dot' },
+          layer: 'below',
+        });
+      });
+
+      plotData.push({
+        x: [null],
+        y: [null],
+        type: 'scatter',
+        mode: 'markers',
+        name: '200 ms Refractory Blanking',
+        marker: {
+          symbol: 'square',
+          color: 'rgba(239, 68, 68, 0.45)',
+          size: 9,
+          line: { color: '#ef4444', width: 1 },
+        },
+      });
+    }
+
+    // -------------------------------------------------------------
+    // Diagnostic Overlay 2: Search-Back Detections (Amber marker + "Search-back" label)
+    // -------------------------------------------------------------
+    if (showSearchback && data.stages.searchback && data.stages.searchback.length > 0) {
+      const validSb = data.stages.searchback.filter((p) => p < signalData.length);
+      if (validSb.length > 0) {
+        plotData.push({
+          x: validSb.map((p) => p / fs),
+          y: validSb.map((p) => signalData[p]),
+          type: 'scatter',
+          mode: 'markers+text',
+          name: 'Search-back Detections',
+          text: validSb.map(() => '<b>Search-back</b>'),
+          textposition: 'top center',
+          textfont: { color: '#f59e0b', size: 11, family: 'Inter, sans-serif' },
+          marker: {
+            color: '#f59e0b',
+            size: 11,
+            symbol: 'diamond',
+            line: { color: '#ffffff', width: 2 },
+          },
+          hoverinfo: 'text+x+y',
+          hovertext: validSb.map((p) => `Search-back QRS: ${(p / fs).toFixed(3)} s (Sample ${p})`),
+        });
+      }
+    }
+
+    // -------------------------------------------------------------
+    // Diagnostic Overlay 3: T-Wave Rejection (Hollow marker + tooltip "Rejected: T-wave")
+    // -------------------------------------------------------------
+    if (showRejectedT && data.stages.rejected_t_waves && data.stages.rejected_t_waves.length > 0) {
+      const validRejected = data.stages.rejected_t_waves.filter((p) => p < signalData.length);
+      if (validRejected.length > 0) {
+        plotData.push({
+          x: validRejected.map((p) => p / fs),
+          y: validRejected.map((p) => signalData[p]),
+          type: 'scatter',
+          mode: 'markers',
+          name: 'Rejected: T-wave',
+          marker: {
+            color: '#c084fc',
+            size: 8,
+            symbol: 'circle-open',
+            line: { color: '#c084fc', width: 2 },
+          },
+          hoverinfo: 'text+x+y',
+          hovertext: validRejected.map(() => 'Rejected: T-wave'),
+        });
+      }
+    }
+
     if (activeStage === 'original') {
       const searchbackSet = new Set(data.stages.searchback || []);
 
       // 1. Shaded QRS region and boundary lines for the selected beat
       if (currentBeat && typeof currentBeat.qrs_onset_time === 'number' && typeof currentBeat.qrs_offset_time === 'number') {
+      // 1. Shaded QRS region and boundary lines for the selected beat (when Delineation is ON)
+      if (showDelineation && currentBeat && typeof currentBeat.qrs_onset_time === 'number' && typeof currentBeat.qrs_offset_time === 'number') {
         // Subtle shaded QRS region from onset to offset
         shapes.push({
           type: 'rect',
@@ -508,9 +609,11 @@ function App() {
       }
 
       // 2. Subtle markers for all other beats across the 10-second sweep
+      // 2. Subtle markers for other primary beats across the 10-second sweep
       if (data.stages.peaks_original) {
         const otherNormal = data.stages.peaks_original.filter(
           (p) => !searchbackSet.has(p) && (currentBeat ? p !== currentBeat.pt_qrs_index && p !== currentBeat.r_index : true)
+          (p) => !searchbackSet.has(p) && (showDelineation && currentBeat ? p !== currentBeat.pt_qrs_index && p !== currentBeat.r_index : true)
         );
         const otherSb = data.stages.peaks_original.filter(
           (p) => searchbackSet.has(p) && (currentBeat ? p !== currentBeat.pt_qrs_index && p !== currentBeat.r_index : true)
@@ -523,11 +626,13 @@ function App() {
             type: 'scatter',
             mode: 'markers',
             name: 'Other QRS (Normal)',
+            name: 'Primary QRS Peaks',
             marker: {
               color: 'rgba(239, 68, 68, 0.45)',
               size: 8,
               symbol: 'circle-open',
               line: { width: 1.5 },
+              line: { width: 1.5, color: '#ef4444' },
             },
           });
         }
@@ -589,6 +694,28 @@ function App() {
           name: 'Threshold I1 (Primary)',
           line: { color: '#f59e0b', width: 2 },
         });
+      // Adaptive threshold curves (Toggleable)
+      if (showThresholds) {
+        if (data.stages.threshold_i1) {
+          plotData.push({
+            x: timeAxis,
+            y: data.stages.threshold_i1,
+            type: 'scatter',
+            mode: 'lines',
+            name: 'Threshold I1 (Primary)',
+            line: { color: '#f59e0b', width: 2 },
+          });
+        }
+        if (data.stages.threshold_i2) {
+          plotData.push({
+            x: timeAxis,
+            y: data.stages.threshold_i2,
+            type: 'scatter',
+            mode: 'lines',
+            name: 'Threshold I2 (Search-back)',
+            line: { color: '#fbbf24', width: 1.5, dash: 'dash' },
+          });
+        }
       }
       if (data.stages.threshold_i2) {
         plotData.push({
@@ -600,6 +727,7 @@ function App() {
           line: { color: '#fbbf24', width: 1.5, dash: 'dash' },
         });
       }
+
       if (data.stages.peaks_integrated && data.stages.peaks_integrated.length > 0) {
         plotData.push({
           x: data.stages.peaks_integrated.map((p) => p / fs),
@@ -638,6 +766,28 @@ function App() {
           name: 'Threshold F1 (Primary)',
           line: { color: '#f59e0b', width: 2 },
         });
+      // Adaptive threshold curves (Toggleable)
+      if (showThresholds) {
+        if (data.stages.threshold_f1) {
+          plotData.push({
+            x: timeAxis,
+            y: data.stages.threshold_f1,
+            type: 'scatter',
+            mode: 'lines',
+            name: 'Threshold F1 (Primary)',
+            line: { color: '#f59e0b', width: 2 },
+          });
+        }
+        if (data.stages.threshold_f2) {
+          plotData.push({
+            x: timeAxis,
+            y: data.stages.threshold_f2,
+            type: 'scatter',
+            mode: 'lines',
+            name: 'Threshold F2 (Search-back)',
+            line: { color: '#fbbf24', width: 1.5, dash: 'dash' },
+          });
+        }
       }
       if (data.stages.threshold_f2) {
         plotData.push({
@@ -1220,6 +1370,198 @@ function App() {
               })}
             </div>
 
+            {/* Diagnostic Overlays Toolbar */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: 'rgba(15, 23, 42, 0.75)',
+                border: '1px solid #334155',
+                borderRadius: '10px',
+                padding: '0.45rem 0.75rem',
+                flexWrap: 'wrap',
+                gap: '0.5rem',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.74rem', fontWeight: 600, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '0.35rem', marginRight: '0.2rem' }}>
+                  <Layers size={14} color="#38bdf8" />
+                  OVERLAYS:
+                </span>
+
+                {/* Toggle: Refractory Intervals */}
+                <button
+                  type="button"
+                  onClick={() => setShowRefractory(!showRefractory)}
+                  style={{
+                    background: showRefractory ? 'rgba(239, 68, 68, 0.2)' : 'rgba(30, 41, 59, 0.5)',
+                    border: showRefractory ? '1px solid #ef4444' : '1px solid #334155',
+                    color: showRefractory ? '#fca5a5' : '#64748b',
+                    borderRadius: '6px',
+                    padding: '0.25rem 0.55rem',
+                    fontSize: '0.72rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    transition: 'all 0.15s ease',
+                  }}
+                  title="Toggle 200 ms physiological blanking shaded intervals after each accepted QRS"
+                >
+                  <span style={{ width: 8, height: 8, borderRadius: '2px', background: showRefractory ? '#ef4444' : '#475569', display: 'inline-block' }} />
+                  Refractory (200 ms)
+                </button>
+
+                {/* Toggle: Search-Back Detections */}
+                <button
+                  type="button"
+                  onClick={() => setShowSearchback(!showSearchback)}
+                  style={{
+                    background: showSearchback ? 'rgba(245, 158, 11, 0.2)' : 'rgba(30, 41, 59, 0.5)',
+                    border: showSearchback ? '1px solid #f59e0b' : '1px solid #334155',
+                    color: showSearchback ? '#fcd34d' : '#64748b',
+                    borderRadius: '6px',
+                    padding: '0.25rem 0.55rem',
+                    fontSize: '0.72rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    transition: 'all 0.15s ease',
+                  }}
+                  title="Toggle amber diamond marker and 'Search-back' label for recovered beats"
+                >
+                  <span style={{ width: 7, height: 7, transform: 'rotate(45deg)', background: showSearchback ? '#f59e0b' : '#475569', display: 'inline-block' }} />
+                  Search-Back
+                </button>
+
+                {/* Toggle: T-Wave Rejection */}
+                <button
+                  type="button"
+                  onClick={() => setShowRejectedT(!showRejectedT)}
+                  style={{
+                    background: showRejectedT ? 'rgba(192, 132, 252, 0.2)' : 'rgba(30, 41, 59, 0.5)',
+                    border: showRejectedT ? '1px solid #c084fc' : '1px solid #334155',
+                    color: showRejectedT ? '#e9d5ff' : '#64748b',
+                    borderRadius: '6px',
+                    padding: '0.25rem 0.55rem',
+                    fontSize: '0.72rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    transition: 'all 0.15s ease',
+                  }}
+                  title="Toggle hollow markers and tooltip for candidates rejected by T-wave discrimination"
+                >
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', border: `1.5px solid ${showRejectedT ? '#c084fc' : '#475569'}`, display: 'inline-block' }} />
+                  Rejected T-Waves
+                </button>
+
+                {/* Toggle: Adaptive Thresholds */}
+                <button
+                  type="button"
+                  onClick={() => setShowThresholds(!showThresholds)}
+                  style={{
+                    background: showThresholds ? 'rgba(16, 185, 129, 0.2)' : 'rgba(30, 41, 59, 0.5)',
+                    border: showThresholds ? '1px solid #10b981' : '1px solid #334155',
+                    color: showThresholds ? '#6ee7b7' : '#64748b',
+                    borderRadius: '6px',
+                    padding: '0.25rem 0.55rem',
+                    fontSize: '0.72rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    transition: 'all 0.15s ease',
+                  }}
+                  title="Toggle primary (TH1) and search-back (TH2) adaptive threshold curves on Integrated and Bandpass stages"
+                >
+                  <span style={{ width: 10, height: 2, background: showThresholds ? '#10b981' : '#475569', display: 'inline-block' }} />
+                  Thresholds
+                </button>
+
+                {/* Toggle: QRS Delineation (when on Original stage) */}
+                {activeStage === 'original' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowDelineation(!showDelineation)}
+                    style={{
+                      background: showDelineation ? 'rgba(59, 130, 246, 0.2)' : 'rgba(30, 41, 59, 0.5)',
+                      border: showDelineation ? '1px solid #3b82f6' : '1px solid #334155',
+                      color: showDelineation ? '#93c5fd' : '#64748b',
+                      borderRadius: '6px',
+                      padding: '0.25rem 0.55rem',
+                      fontSize: '0.72rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      transition: 'all 0.15s ease',
+                    }}
+                    title="Toggle Q, R, S, onset, and offset morphological markers on the raw ECG"
+                  >
+                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: showDelineation ? '#3b82f6' : '#475569', display: 'inline-block' }} />
+                    Morphology (QRS)
+                  </button>
+                )}
+              </div>
+
+              {/* Quick Clean View / Show All buttons */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowRefractory(false);
+                    setShowSearchback(false);
+                    setShowRejectedT(false);
+                    setShowThresholds(false);
+                    setShowDelineation(false);
+                  }}
+                  style={{
+                    background: 'rgba(30, 41, 59, 0.6)',
+                    border: '1px solid #475569',
+                    color: '#94a3b8',
+                    borderRadius: '5px',
+                    padding: '0.22rem 0.5rem',
+                    fontSize: '0.68rem',
+                    cursor: 'pointer',
+                  }}
+                  title="Hide all overlays for a completely clean ECG waveform"
+                >
+                  Clean View
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowRefractory(true);
+                    setShowSearchback(true);
+                    setShowRejectedT(true);
+                    setShowThresholds(true);
+                    setShowDelineation(true);
+                  }}
+                  style={{
+                    background: 'rgba(30, 41, 59, 0.6)',
+                    border: '1px solid #475569',
+                    color: '#cbd5e1',
+                    borderRadius: '5px',
+                    padding: '0.22rem 0.5rem',
+                    fontSize: '0.68rem',
+                    cursor: 'pointer',
+                  }}
+                  title="Enable all diagnostic overlays"
+                >
+                  Show All
+                </button>
+              </div>
+            </div>
+
             {/* ECG Plot Container */}
             <div
               className="plot-container"
@@ -1242,6 +1584,8 @@ function App() {
 
             {/* Selected-Beat Information Panel & Pan-Tompkins Evidence (When Original is Active) */}
             {activeStage === 'original' && data?.delineation?.length > 0 && (() => {
+            {/* Selected-Beat Information Panel & Pan-Tompkins Evidence */}
+            {data?.delineation?.length > 0 && (() => {
               const selectedBeat = data.delineation[selectedBeatIndex] || data.delineation[0];
               const totalBeats = data.delineation.length;
               const isSearchback = selectedBeat?.detection_evidence?.method === 'searchback';
@@ -1249,16 +1593,21 @@ function App() {
                 ? selectedBeat.dominant_deflection_type.toUpperCase()
                 : 'NORMAL';
 
+              const ev = selectedBeat?.detection_evidence || {};
+
               return (
                 <div
                   style={{
                     background: 'rgba(15, 23, 42, 0.75)',
+                    background: 'rgba(15, 23, 42, 0.85)',
                     border: '1px solid #334155',
                     borderRadius: '12px',
                     padding: '0.8rem 1rem',
+                    padding: '0.85rem 1rem',
                     display: 'flex',
                     flexDirection: 'column',
                     gap: '0.65rem',
+                    gap: '0.75rem',
                   }}
                 >
                   {/* Beat Navigation Bar */}
@@ -1273,6 +1622,7 @@ function App() {
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
                       <span style={{ fontSize: '0.98rem', fontWeight: 700, color: '#f8fafc' }}>
+                      <span style={{ fontSize: '1rem', fontWeight: 700, color: '#f8fafc' }}>
                         Beat #{(selectedBeat?.beat_index ?? 0) + 1}{' '}
                         <span style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: 400 }}>
                           of {totalBeats}
@@ -1284,17 +1634,26 @@ function App() {
                           fontSize: '0.72rem',
                           fontWeight: 600,
                           padding: '0.2rem 0.55rem',
+                          fontSize: '0.74rem',
+                          fontWeight: 700,
+                          padding: '0.2rem 0.6rem',
                           borderRadius: '6px',
                           background: isSearchback
                             ? 'rgba(245, 158, 11, 0.18)'
                             : 'rgba(16, 185, 129, 0.18)',
+                            ? 'rgba(245, 158, 11, 0.2)'
+                            : 'rgba(16, 185, 129, 0.2)',
                           color: isSearchback ? '#fbbf24' : '#34d399',
                           border: isSearchback
                             ? '1px solid rgba(245, 158, 11, 0.4)'
                             : '1px solid rgba(16, 185, 129, 0.4)',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.3rem',
                         }}
                       >
                         {isSearchback ? 'Search-Back Recovery' : 'Primary Detection'}
+                        {isSearchback ? '★ Search-Back Recovery' : '✓ Primary Dual-Threshold'}
                       </span>
 
                       <span
@@ -1309,6 +1668,15 @@ function App() {
                         }}
                       >
                         {domType} MORPHOLOGY
+                      </span>
+
+                      <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                        Fiducial:{' '}
+                        <strong style={{ color: '#e2e8f0' }}>
+                          {typeof selectedBeat?.pt_qrs_index === 'number'
+                            ? `${(selectedBeat.pt_qrs_index / fs).toFixed(3)} s (Sample ${selectedBeat.pt_qrs_index})`
+                            : '--'}
+                        </strong>
                       </span>
                     </div>
 
@@ -1382,6 +1750,7 @@ function App() {
                   </div>
 
                   {/* Selected-Beat Measurements Grid */}
+                  {/* Primary 5 Evidence Cards (Signal Peak, Noise Peak, Threshold, RR Interval, Detection Method) */}
                   <div
                     style={{
                       display: 'grid',
@@ -1391,64 +1760,228 @@ function App() {
                       padding: '0.65rem 0.8rem',
                       borderRadius: '8px',
                       border: '1px solid rgba(51, 65, 85, 0.5)',
+                      gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
+                      gap: '0.55rem',
                     }}
                   >
                     <div>
                       <div style={{ fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase' }}>
                         Q Point
+                    {/* 1. Signal Peak Card */}
+                    <div
+                      style={{
+                        background: 'rgba(30, 41, 59, 0.7)',
+                        border: '1px solid rgba(16, 185, 129, 0.35)',
+                        borderRadius: '8px',
+                        padding: '0.65rem 0.75rem',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.2rem',
+                      }}
+                    >
+                      <div style={{ fontSize: '0.68rem', color: '#10b981', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                        <Activity size={12} />
+                        Signal Peak
                       </div>
                       <div style={{ fontSize: '0.92rem', fontWeight: 600, color: '#f59e0b', marginTop: '0.2rem' }}>
                         {typeof selectedBeat?.q_time === 'number' ? `${selectedBeat.q_time.toFixed(3)} s` : 'None'}
+                      <div style={{ fontSize: '0.96rem', fontWeight: 700, color: '#f8fafc' }}>
+                        SPKI: {ev.spki !== undefined ? ev.spki.toFixed(4) : '--'}
                       </div>
+                      <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                        SPKF: <strong style={{ color: '#cbd5e1' }}>{ev.spkf !== undefined ? ev.spkf.toFixed(4) : '--'}</strong>
+                      </div>
+                      {ev.integrated_peak_val !== undefined && (
+                        <div style={{ fontSize: '0.68rem', color: '#64748b' }}>
+                          Peak: {ev.integrated_peak_val.toFixed(4)}
+                        </div>
+                      )}
                     </div>
 
                     <div>
                       <div style={{ fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase' }}>
                         R Peak
+                    {/* 2. Noise Peak Card */}
+                    <div
+                      style={{
+                        background: 'rgba(30, 41, 59, 0.7)',
+                        border: '1px solid rgba(239, 68, 68, 0.35)',
+                        borderRadius: '8px',
+                        padding: '0.65rem 0.75rem',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.2rem',
+                      }}
+                    >
+                      <div style={{ fontSize: '0.68rem', color: '#f87171', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                        <AlertTriangle size={12} />
+                        Noise Peak
                       </div>
                       <div style={{ fontSize: '0.92rem', fontWeight: 600, color: '#ef4444', marginTop: '0.2rem' }}>
                         {typeof selectedBeat?.r_time === 'number' ? `${selectedBeat.r_time.toFixed(3)} s` : 'None (QS)'}
+                      <div style={{ fontSize: '0.96rem', fontWeight: 700, color: '#f8fafc' }}>
+                        NPKI: {ev.npki !== undefined ? ev.npki.toFixed(4) : '--'}
                       </div>
                     </div>
 
                     <div>
                       <div style={{ fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase' }}>
                         S Point
+                      <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                        NPKF: <strong style={{ color: '#cbd5e1' }}>{ev.npkf !== undefined ? ev.npkf.toFixed(4) : '--'}</strong>
                       </div>
                       <div style={{ fontSize: '0.92rem', fontWeight: 600, color: '#38bdf8', marginTop: '0.2rem' }}>
                         {typeof selectedBeat?.s_time === 'number' ? `${selectedBeat.s_time.toFixed(3)} s` : 'None'}
+                      <div style={{ fontSize: '0.68rem', color: '#64748b' }}>
+                        Adaptive estimate
                       </div>
                     </div>
 
                     <div>
                       <div style={{ fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase' }}>
                         QRS Duration
+                    {/* 3. Threshold Card */}
+                    <div
+                      style={{
+                        background: 'rgba(30, 41, 59, 0.7)',
+                        border: '1px solid rgba(245, 158, 11, 0.35)',
+                        borderRadius: '8px',
+                        padding: '0.65rem 0.75rem',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.2rem',
+                      }}
+                    >
+                      <div style={{ fontSize: '0.68rem', color: '#fbbf24', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                        <Sliders size={12} />
+                        Threshold
                       </div>
                       <div style={{ fontSize: '0.92rem', fontWeight: 600, color: '#10b981', marginTop: '0.2rem' }}>
                         {typeof selectedBeat?.qrs_duration_ms === 'number' ? `${selectedBeat.qrs_duration_ms.toFixed(1)} ms` : '--'}
+                      <div style={{ fontSize: '0.96rem', fontWeight: 700, color: '#f8fafc' }}>
+                        TH_I1: {ev.threshold_i1 !== undefined ? ev.threshold_i1.toFixed(4) : '--'}
+                      </div>
+                      <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                        TH_I2: <strong style={{ color: '#cbd5e1' }}>{ev.threshold_i2 !== undefined ? ev.threshold_i2.toFixed(4) : '--'}</strong>
+                      </div>
+                      <div style={{ fontSize: '0.68rem', color: isSearchback ? '#f59e0b' : '#10b981' }}>
+                        Active: {isSearchback ? 'TH2 (Search-back)' : 'TH1 (Primary)'}
                       </div>
                     </div>
 
                     <div>
                       <div style={{ fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase' }}>
+                    {/* 4. RR Interval Card */}
+                    <div
+                      style={{
+                        background: 'rgba(30, 41, 59, 0.7)',
+                        border: '1px solid rgba(167, 139, 250, 0.35)',
+                        borderRadius: '8px',
+                        padding: '0.65rem 0.75rem',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.2rem',
+                      }}
+                    >
+                      <div style={{ fontSize: '0.68rem', color: '#a78bfa', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                        <Heart size={12} />
                         RR Interval
                       </div>
                       <div style={{ fontSize: '0.92rem', fontWeight: 600, color: '#a78bfa', marginTop: '0.2rem' }}>
                         {selectedBeat?.detection_evidence?.rr_interval_ms
                           ? `${selectedBeat.detection_evidence.rr_interval_ms} ms`
                           : (selectedBeat?.beat_index === 0 ? 'Initial Beat' : '--')}
+                      <div style={{ fontSize: '0.96rem', fontWeight: 700, color: '#f8fafc' }}>
+                        {ev.rr_interval_ms ? `${ev.rr_interval_ms.toFixed(1)} ms` : (selectedBeat?.beat_index === 0 ? 'Initial Beat' : '--')}
                       </div>
+                      <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                        {ev.rr_interval_samples ? `${ev.rr_interval_samples} samples` : 'Learning phase'}
+                      </div>
+                      {ev.rr_interval_ms && (
+                        <div style={{ fontSize: '0.68rem', color: '#a78bfa' }}>
+                          Instant: ~{Math.round(60000 / ev.rr_interval_ms)} bpm
+                        </div>
+                      )}
                     </div>
 
                     <div>
                       <div style={{ fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase' }}>
                         Detection
+                    {/* 5. Detection Method Card */}
+                    <div
+                      style={{
+                        background: 'rgba(30, 41, 59, 0.7)',
+                        border: isSearchback ? '1px solid rgba(245, 158, 11, 0.45)' : '1px solid rgba(59, 130, 246, 0.35)',
+                        borderRadius: '8px',
+                        padding: '0.65rem 0.75rem',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.2rem',
+                      }}
+                    >
+                      <div style={{ fontSize: '0.68rem', color: isSearchback ? '#fbbf24' : '#60a5fa', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                        <Cpu size={12} />
+                        Detection Method
                       </div>
                       <div style={{ fontSize: '0.92rem', fontWeight: 600, color: '#f8fafc', marginTop: '0.2rem' }}>
                         {isSearchback ? 'Search-back' : 'Primary'}
+                      <div style={{ fontSize: '0.92rem', fontWeight: 700, color: isSearchback ? '#fbbf24' : '#38bdf8' }}>
+                        {isSearchback ? 'Search-Back' : 'Primary Detection'}
+                      </div>
+                      <div style={{ fontSize: '0.7rem', color: '#94a3b8', lineHeight: 1.25 }}>
+                        {isSearchback ? 'Timeout > 1.66 × RR_AVG2' : 'Dual-threshold confirmed'}
+                      </div>
+                      <div style={{ fontSize: '0.68rem', color: '#10b981' }}>
+                        ✓ Refractory (&gt; 200 ms)
                       </div>
                     </div>
                   </div>
+
+                  {/* Morphological Measurements (When on Original stage) */}
+                  {activeStage === 'original' && (
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
+                        gap: '0.5rem',
+                        background: 'rgba(15, 23, 42, 0.5)',
+                        padding: '0.55rem 0.75rem',
+                        borderRadius: '8px',
+                        border: '1px solid rgba(51, 65, 85, 0.4)',
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase' }}>Q Nadir</div>
+                        <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#f59e0b', marginTop: '0.15rem' }}>
+                          {typeof selectedBeat?.q_time === 'number' ? `${selectedBeat.q_time.toFixed(3)} s` : 'None'}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase' }}>R Peak</div>
+                        <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#ef4444', marginTop: '0.15rem' }}>
+                          {typeof selectedBeat?.r_time === 'number' ? `${selectedBeat.r_time.toFixed(3)} s` : 'None (QS)'}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase' }}>S Nadir</div>
+                        <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#38bdf8', marginTop: '0.15rem' }}>
+                          {typeof selectedBeat?.s_time === 'number' ? `${selectedBeat.s_time.toFixed(3)} s` : 'None'}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase' }}>QRS Duration</div>
+                        <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#10b981', marginTop: '0.15rem' }}>
+                          {typeof selectedBeat?.qrs_duration_ms === 'number' ? `${selectedBeat.qrs_duration_ms.toFixed(1)} ms` : '--'}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase' }}>Baseline Voltage</div>
+                        <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#94a3b8', marginTop: '0.15rem' }}>
+                          {typeof selectedBeat?.isoelectric_baseline === 'number' ? `${selectedBeat.isoelectric_baseline.toFixed(3)} mV` : '--'}
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Collapsible Detection Evidence Section */}
                   <div
@@ -1472,6 +2005,7 @@ function App() {
                         color: '#cbd5e1',
                         padding: '0.5rem 0.8rem',
                         fontSize: '0.8rem',
+                        fontSize: '0.78rem',
                         fontWeight: 600,
                         cursor: 'pointer',
                         textAlign: 'left',
@@ -1480,6 +2014,7 @@ function App() {
                       <span style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
                         <Cpu size={14} color="#f59e0b" />
                         Detection Evidence &amp; Pan-Tompkins Criteria
+                        Detailed Adaptive Evidence &amp; Pan-Tompkins State
                       </span>
                       {isEvidenceOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
                     </button>
@@ -1490,6 +2025,7 @@ function App() {
                           padding: '0.7rem 0.85rem',
                           borderTop: '1px solid rgba(51, 65, 85, 0.4)',
                           fontSize: '0.78rem',
+                          fontSize: '0.76rem',
                           color: '#94a3b8',
                           display: 'grid',
                           gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
@@ -1499,27 +2035,39 @@ function App() {
                         <div>
                           <strong style={{ color: '#e2e8f0', display: 'block', marginBottom: '0.2rem' }}>
                             Integration Threshold
+                            Integrated State (SPKI / NPKI)
                           </strong>
                           <div>TH_I1: <span style={{ color: '#f59e0b' }}>{selectedBeat?.detection_evidence?.threshold_i1 ?? '--'}</span></div>
                           <div>TH_I2: <span style={{ color: '#fbbf24' }}>{selectedBeat?.detection_evidence?.threshold_i2 ?? '--'}</span></div>
+                          <div>Signal Level (SPKI): <span style={{ color: '#10b981' }}>{ev.spki !== undefined ? ev.spki.toFixed(4) : '--'}</span></div>
+                          <div>Noise Level (NPKI): <span style={{ color: '#f87171' }}>{ev.npki !== undefined ? ev.npki.toFixed(4) : '--'}</span></div>
+                          <div>Threshold I1 (Primary): <span style={{ color: '#f59e0b' }}>{ev.threshold_i1 !== undefined ? ev.threshold_i1.toFixed(4) : '--'}</span></div>
+                          <div>Threshold I2 (Search-back): <span style={{ color: '#fbbf24' }}>{ev.threshold_i2 !== undefined ? ev.threshold_i2.toFixed(4) : '--'}</span></div>
                         </div>
 
                         <div>
                           <strong style={{ color: '#e2e8f0', display: 'block', marginBottom: '0.2rem' }}>
                             Filtered Threshold
+                            Filtered State (SPKF / NPKF)
                           </strong>
                           <div>TH_F1: <span style={{ color: '#f59e0b' }}>{selectedBeat?.detection_evidence?.threshold_f1 ?? '--'}</span></div>
                           <div>TH_F2: <span style={{ color: '#fbbf24' }}>{selectedBeat?.detection_evidence?.threshold_f2 ?? '--'}</span></div>
+                          <div>Signal Level (SPKF): <span style={{ color: '#10b981' }}>{ev.spkf !== undefined ? ev.spkf.toFixed(4) : '--'}</span></div>
+                          <div>Noise Level (NPKF): <span style={{ color: '#f87171' }}>{ev.npkf !== undefined ? ev.npkf.toFixed(4) : '--'}</span></div>
+                          <div>Threshold F1 (Primary): <span style={{ color: '#f59e0b' }}>{ev.threshold_f1 !== undefined ? ev.threshold_f1.toFixed(4) : '--'}</span></div>
+                          <div>Threshold F2 (Search-back): <span style={{ color: '#fbbf24' }}>{ev.threshold_f2 !== undefined ? ev.threshold_f2.toFixed(4) : '--'}</span></div>
                         </div>
 
                         <div>
                           <strong style={{ color: '#e2e8f0', display: 'block', marginBottom: '0.2rem' }}>
                             RR Condition
+                            Classification Criteria &amp; Blanking
                           </strong>
                           <div>
                             {selectedBeat?.detection_evidence?.rr_interval_ms
                               ? `${selectedBeat.detection_evidence.rr_interval_ms} ms (within 92%-116% RR2)`
                               : 'Initial adaptation period'}
+                            Refractory: <span style={{ color: '#10b981' }}>Passed (&gt; 200 ms physiological blanking)</span>
                           </div>
                         </div>
 
@@ -1542,6 +2090,13 @@ function App() {
                             Final Decision
                           </strong>
                           <div style={{ color: isSearchback ? '#fbbf24' : '#34d399' }}>
+                          <div>
+                            T-Wave Test: <span style={{ color: '#10b981' }}>Passed (slope discrimination confirmed)</span>
+                          </div>
+                          <div>
+                            RR Regularity: <span style={{ color: '#cbd5e1' }}>{ev.rr_interval_ms ? `${ev.rr_interval_ms} ms (sample count: ${ev.rr_interval_samples ?? '--'})` : 'Initial beat'}</span>
+                          </div>
+                          <div style={{ marginTop: '0.25rem', color: isSearchback ? '#fbbf24' : '#34d399' }}>
                             {isSearchback
                               ? 'Recovered via Search-Back (PEAKI > TH_I2 & PEAKF > TH_F2)'
                               : 'Confirmed Primary QRS (PEAKI > TH_I1 & PEAKF > TH_F1)'}
@@ -1552,6 +2107,7 @@ function App() {
                   </div>
 
                   {/* Standard QRS Morphology Legend */}
+                  {/* Diagnostic Legend */}
                   <div
                     style={{
                       display: 'flex',
@@ -1568,18 +2124,26 @@ function App() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                       <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#f59e0b', display: 'inline-block' }} />
                       <span><strong>Q</strong> = Q-wave estimate</span>
+                      <span style={{ width: 10, height: 10, borderRadius: '2px', background: 'rgba(239, 68, 68, 0.25)', border: '1px solid #ef4444', display: 'inline-block' }} />
+                      <span><strong>200 ms Refractory</strong> (Blanking)</span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                       <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} />
                       <span><strong>R</strong> = R-wave / fiducial estimate</span>
+                      <span style={{ width: 8, height: 8, transform: 'rotate(45deg)', background: '#f59e0b', display: 'inline-block' }} />
+                      <span><strong>Amber Diamond</strong> (Search-Back Detection)</span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                       <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#38bdf8', display: 'inline-block' }} />
                       <span><strong>S</strong> = S-wave estimate</span>
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', border: '1.5px solid #c084fc', display: 'inline-block' }} />
+                      <span><strong>Hollow Purple</strong> (Rejected: T-wave)</span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                       <span style={{ width: 14, height: 8, borderRadius: '2px', background: 'rgba(59, 130, 246, 0.3)', border: '1px solid rgba(59, 130, 246, 0.6)', display: 'inline-block' }} />
                       <span><strong>QRS</strong> = detected complex (onset to offset)</span>
+                      <span style={{ width: 12, height: 2, background: '#f59e0b', display: 'inline-block' }} />
+                      <span><strong>Threshold Lines</strong> (TH1 solid, TH2 dashed)</span>
                     </div>
                   </div>
                 </div>

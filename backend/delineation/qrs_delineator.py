@@ -450,8 +450,28 @@ class QRSDelineator:
                 if "threshold_f2" in detection_metadata and pt_qrs_index < len(detection_metadata["threshold_f2"]):
                     det_evidence["threshold_f2"] = detection_metadata["threshold_f2"][pt_qrs_index]
 
+                if "spki" in detection_metadata and pt_qrs_index < len(detection_metadata["spki"]):
+                    det_evidence["spki"] = detection_metadata["spki"][pt_qrs_index]
+                if "npki" in detection_metadata and pt_qrs_index < len(detection_metadata["npki"]):
+                    det_evidence["npki"] = detection_metadata["npki"][pt_qrs_index]
+                if "spkf" in detection_metadata and pt_qrs_index < len(detection_metadata["spkf"]):
+                    det_evidence["spkf"] = detection_metadata["spkf"][pt_qrs_index]
+                if "npkf" in detection_metadata and pt_qrs_index < len(detection_metadata["npkf"]):
+                    det_evidence["npkf"] = detection_metadata["npkf"][pt_qrs_index]
+
+                if "peaks_integrated" in detection_metadata and beat_idx < len(detection_metadata["peaks_integrated"]):
+                    p_int = detection_metadata["peaks_integrated"][beat_idx]
+                    det_evidence["integrated_peak_sample"] = p_int
+                    if "integrated" in detection_metadata and p_int < len(detection_metadata["integrated"]):
+                        det_evidence["integrated_peak_val"] = round(float(detection_metadata["integrated"][p_int]), 4)
+                if "bandpass" in detection_metadata and pt_qrs_index < len(detection_metadata["bandpass"]):
+                    det_evidence["bandpass_peak_val"] = round(float(detection_metadata["bandpass"][pt_qrs_index]), 4)
+
                 if "rr_intervals" in detection_metadata and beat_idx > 0 and (beat_idx - 1) < len(detection_metadata["rr_intervals"]):
                     det_evidence["rr_interval_ms"] = round(detection_metadata["rr_intervals"][beat_idx - 1] / fs * 1000.0, 1)
+                    rr_samples = detection_metadata["rr_intervals"][beat_idx - 1]
+                    det_evidence["rr_interval_samples"] = rr_samples
+                    det_evidence["rr_interval_ms"] = round(rr_samples / fs * 1000.0, 1)
 
             # -------------------------------------------------------------
             # 10. Assemble Beat Delineation Record

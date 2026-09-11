@@ -251,6 +251,38 @@ class TestQRSDelineator(unittest.TestCase):
         stages2 = self.detector.process(sig, fs)
         self.assertEqual(stages2['peaks_original'], peaks1)
 
+    def test_detection_evidence_metadata_enrichment(self):
+        """
+        Verify that detection_evidence in delineated beats contains real metadata:
+        signal peaks (spki, spkf), noise peaks (npki, npkf), thresholds, and rr intervals.
+        """
+        sig, fs = self._load_record('100', duration_sec=5)
+        stages = self.detector.process(sig, fs)
+        beats = self.delineator.delineate_beats(sig, fs, stages['peaks_original'], detection_metadata=stages)
+
+        self.assertGreater(len(beats), 1)
+        # Check second beat (which has a preceding RR interval)
+        b = beats[1]
+        det_ev = b['detection_evidence']
+        self.assertIn('method', det_ev)
+        self.assertIn('spki', det_ev)
+        self.assertIn('npki', det_ev)
+        self.assertIn('spkf', det_ev)
+        self.assertIn('npkf', det_ev)
+        self.assertIn('threshold_i1', det_ev)
+        self.assertIn('threshold_i2', det_ev)
+        self.assertIn('threshold_f1', det_ev)
+        self.assertIn('threshold_f2', det_ev)
+        self.assertIn('rr_interval_ms', det_ev)
+        self.assertIn('rr_interval_samples', det_ev)
+
+        # Check values are valid non-negative floats / ints
+        self.assertGreater(det_ev['spki'], 0)
+        self.assertGreater(det_ev['spkf'], 0)
+        self.assertGreaterEqual(det_ev['npki'], 0)
+        self.assertGreaterEqual(det_ev['npkf'], 0)
+        self.assertGreater(det_ev['rr_interval_ms'], 0)
+
 
 if __name__ == '__main__':
     unittest.main()
