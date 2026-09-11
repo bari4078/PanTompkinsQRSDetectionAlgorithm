@@ -121,7 +121,7 @@ export default function PlaybackStats({ state = {}, duration = 0, totalBeats = 0
         }}
       >
         <span>
-          Phase:{' '}
+          Phase: <br/>
           <span style={{ color: '#60a5fa', fontWeight: 600 }}>
             {formattedPhaseName}
           </span>

@@ -37,7 +37,7 @@ export default function PlaybackControls({ state = {}, controls = {}, duration =
   } = controls;
 
   // Available speed options
-  const SPEED_OPTIONS = [0.05, 0.1, 0.25, 0.5, 1, 2];
+  const SPEED_OPTIONS = [0.1, 0.25, 0.5, 1];
 
   // Toggle between play and pause
   const handleTogglePlay = () => {

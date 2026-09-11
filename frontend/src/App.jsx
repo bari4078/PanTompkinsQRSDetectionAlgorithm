@@ -1,6 +1,15 @@
 import React, { useState, useEffect, Suspense } from 'react';
 import Plot from 'react-plotly.js';
-import { Activity, Heart, ActivitySquare, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import {
+  Activity,
+  Heart,
+  ActivitySquare,
+  AlertTriangle,
+  CheckCircle2,
+  BookOpen,
+  Settings,
+  Maximize2,
+} from 'lucide-react';
 import { usePlaybackEngine } from './playback/usePlaybackEngine';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
@@ -39,19 +48,20 @@ function App() {
   useEffect(() => {
     fetch('http://localhost:8000/api/records')
       .then(res => res.json())
-      .then(data => {
-        if (data.records && data.records.length > 0) {
-          setRecords(data.records);
-          setSelectedRecord(data.records[0]);
+      .then(result => {
+        if (result.records && result.records.length > 0) {
+          setRecords(result.records);
+          setSelectedRecord(result.records[0]);
         }
       })
-      .catch(err => console.error("Failed to fetch records:", err));
+      .catch(err => console.error('Failed to fetch records:', err));
   }, []);
 
   const processSignal = async () => {
     setLoading(true);
     setError(null);
     playbackControls.stop();
+
     try {
       const response = await fetch('http://localhost:8000/api/process', {
         method: 'POST',
@@ -59,13 +69,13 @@ function App() {
         body: JSON.stringify({
           record_id: selectedRecord,
           window_size_ms: windowSize,
-          lowcut: lowcut,
-          highcut: highcut
-        })
+          lowcut,
+          highcut,
+        }),
       });
 
       if (!response.ok) {
-        throw new Error("Failed to process signal");
+        throw new Error('Failed to process signal');
       }
 
       const result = await response.json();
@@ -87,7 +97,10 @@ function App() {
     if (!data) return null;
 
     const signalData = data.stages[activeStage];
-    const timeAxis = Array.from({length: signalData.length}, (_, i) => i / fs);
+    const timeAxis = Array.from(
+      { length: signalData.length },
+      (_, i) => i / fs
+    );
 
     const plotData = [
       {
@@ -96,187 +109,667 @@ function App() {
         type: 'scatter',
         mode: 'lines',
         name: 'ECG Signal',
-        line: { color: '#3b82f6', width: 2 }
-      }
+        line: { color: '#3b82f6', width: 2 },
+      },
     ];
 
     if (activeStage === 'original' && data.stages.peaks_original) {
-      const peakTimes = data.stages.peaks_original.map(p => p / fs);
-      const peakValues = data.stages.peaks_original.map(p => signalData[p]);
+      const peakTimes = data.stages.peaks_original.map((p) => p / fs);
+      const peakValues = data.stages.peaks_original.map((p) => signalData[p]);
+
       plotData.push({
-        x: peakTimes, y: peakValues, type: 'scatter', mode: 'markers',
-        name: 'Detected R-Peaks', marker: { color: '#ef4444', size: 10, symbol: 'circle-open', line: {width: 2} }
+        x: peakTimes,
+        y: peakValues,
+        type: 'scatter',
+        mode: 'markers',
+        name: 'Detected R-Peaks',
+        marker: {
+          color: '#ef4444',
+          size: 10,
+          symbol: 'circle-open',
+          line: { width: 2 },
+        },
       });
     }
 
     return (
-      <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <div
+        style={{
+          position: 'relative',
+          width: '100%',
+          height: '100%',
+          minHeight: 0,
+        }}
+      >
         <Plot
           data={plotData}
           layout={{
-            autosize: true, margin: { l: 50, r: 20, t: 20, b: 50 },
-            paper_bgcolor: 'transparent', plot_bgcolor: 'transparent',
+            autosize: true,
+            margin: { l: 58, r: 18, t: 14, b: 52 },
+            paper_bgcolor: 'transparent',
+            plot_bgcolor: 'transparent',
             font: { color: '#94a3b8' },
-            xaxis: { title: 'Time (Seconds)', gridcolor: '#334155', zerolinecolor: '#334155', range: [0, DURATION] },
-            yaxis: { title: 'Amplitude', gridcolor: '#334155', zerolinecolor: '#334155' },
-            showlegend: false
+            xaxis: {
+              title: { text: 'Time (seconds)', standoff: 10 },
+              gridcolor: '#334155',
+              zerolinecolor: '#334155',
+              range: [0, DURATION],
+              fixedrange: true,
+            },
+            yaxis: {
+              title: { text: 'Amplitude', standoff: 8 },
+              gridcolor: '#334155',
+              zerolinecolor: '#334155',
+              fixedrange: true,
+            },
+            showlegend: false,
           }}
           useResizeHandler={true}
           style={{ width: '100%', height: '100%' }}
-          config={{ responsive: true, displayModeBar: false, staticPlot: true }}
+          config={{
+            responsive: true,
+            displayModeBar: false,
+            staticPlot: true,
+          }}
         />
-        {/* Playback Cursor Overlay — reads from centralized engine */}
+
+        {/* Playback cursor */}
         <div
           style={{
-            position: 'absolute', top: '20px', bottom: '50px',
-            left: `calc(50px + (100% - 70px) * (${playbackState.currentTime} / ${DURATION}))`,
-            width: '2px', backgroundColor: '#ef4444', zIndex: 10,
-            boxShadow: '0 0 10px #ef4444', pointerEvents: 'none',
-            transition: 'none'
+            position: 'absolute',
+            top: 14,
+            bottom: 52,
+            left: `calc(58px + (100% - 76px) * (${playbackState.currentTime} / ${DURATION}))`,
+            width: 2,
+            backgroundColor: '#ef4444',
+            zIndex: 10,
+            boxShadow: '0 0 10px rgba(239,68,68,0.8)',
+            pointerEvents: 'none',
+            transition: 'none',
           }}
         />
       </div>
     );
   };
 
+  const cardStyle = {
+    background: 'var(--card-bg, #1b263b)',
+    border: '1px solid var(--border-color, #334155)',
+    borderRadius: '18px',
+    minWidth: 0,
+    boxSizing: 'border-box',
+  };
+
   return (
-    <div className="app-container">
-      <header className="header">
-        <h1>Pan-Tompkins Algorithm</h1>
-        <p>Advanced QRS Detection & Cardiac Conduction Visualization</p>
+    <div className="app-container" style={{ minHeight: '100vh' }}>
+      {/* ───────────────────────── Header ───────────────────────── */}
+      <header
+        className="header"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '1.5rem',
+          marginBottom: '1.1rem',
+        }}
+      >
+        <div>
+          <h1 style={{ marginBottom: '0.2rem' }}>Pan-Tompkins Algorithm</h1>
+          <p style={{ margin: 0 }}>
+            Advanced QRS Detection &amp; Cardiac Conduction Visualization
+          </p>
+        </div>
+
+        <div
+          style={{
+            display: 'flex',
+            gap: '0.65rem',
+            flexShrink: 0,
+          }}
+        >
+          <button
+            type="button"
+            className="stage-btn"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.45rem',
+              padding: '0.65rem 0.9rem',
+            }}
+          >
+            <BookOpen size={17} />
+            Documentation
+          </button>
+          {/* <button
+            type="button"
+            className="stage-btn"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.45rem',
+              padding: '0.65rem 0.9rem',
+            }}
+          >
+            <Settings size={17} />
+            Settings
+          </button> */}
+        </div>
       </header>
 
-      <div className="dashboard-grid">
-        {/* Sidebar Controls */}
-        <div className="card">
-          <h2><Activity size={24} /> Parameters</h2>
+      {/* Desktop structure:
+          1) fixed-ish sidebar
+          2) flexible analytics column
+          3) large heart column
+          The heart occupies the whole right side so it can stay visually dominant.
+      */}
+      <div
+        className="dashboard-grid"
+        style={{
+          display: 'grid',
+          gridTemplateColumns:
+            'minmax(260px, 290px) minmax(520px, 1fr) minmax(380px, 430px)',
+          gap: '1.15rem',
+          alignItems: 'stretch',
+        }}
+      >
+        {/* ───────────────────────── Left controls ───────────────────────── */}
+        <aside
+          className="card"
+          style={{
+            ...cardStyle,
+            padding: '1.2rem',
+            alignSelf: 'stretch',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1rem',
+          }}
+        >
+          <div>
+            <h2
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.6rem',
+                margin: 0,
+              }}
+            >
+              <Activity size={22} />
+              Parameters
+            </h2>
+          </div>
 
           <div className="form-group">
             <label>MIT-BIH Record</label>
-            <select className="form-control" value={selectedRecord} onChange={(e) => setSelectedRecord(e.target.value)}>
-              {records.map(rec => <option key={rec} value={rec}>Record {rec}</option>)}
+            <select
+              className="form-control"
+              value={selectedRecord}
+              onChange={(e) => setSelectedRecord(e.target.value)}
+            >
+              {records.map((rec) => (
+                <option key={rec} value={rec}>
+                  Record {rec}
+                </option>
+              ))}
             </select>
           </div>
 
           <div className="form-group">
-            <label>Bandpass Lowcut <span>{lowcut.toFixed(1)} Hz</span></label>
-            <input type="range" className="range-slider" min="1" max="10" step="0.5" value={lowcut} onChange={(e) => setLowcut(Number(e.target.value))} />
+            <label>
+              Bandpass Lowcut <span>{lowcut.toFixed(1)} Hz</span>
+            </label>
+            <input
+              type="range"
+              className="range-slider"
+              min="1"
+              max="10"
+              step="0.5"
+              value={lowcut}
+              onChange={(e) => setLowcut(Number(e.target.value))}
+            />
           </div>
 
           <div className="form-group">
-            <label>Bandpass Highcut <span>{highcut.toFixed(1)} Hz</span></label>
-            <input type="range" className="range-slider" min="10" max="30" step="0.5" value={highcut} onChange={(e) => setHighcut(Number(e.target.value))} />
+            <label>
+              Bandpass Highcut <span>{highcut.toFixed(1)} Hz</span>
+            </label>
+            <input
+              type="range"
+              className="range-slider"
+              min="10"
+              max="30"
+              step="0.5"
+              value={highcut}
+              onChange={(e) => setHighcut(Number(e.target.value))}
+            />
           </div>
 
-          <button className="btn" onClick={processSignal} disabled={loading}>
+          <button
+            className="btn"
+            onClick={processSignal}
+            disabled={loading}
+            style={{ width: '100%' }}
+          >
             {loading ? 'Processing...' : 'Apply & Process'}
           </button>
 
-          {error && <div style={{color: '#ef4444', marginTop: '1rem', fontSize: '0.875rem'}}>Error: {error}</div>}
-        </div>
-
-        {/* Main Content */}
-        <div>
-          {/* Top Row: Metrics & Heart Visualizer */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: '2rem', marginBottom: '2rem' }}>
-            {/* Metrics Dashboard */}
-            <div className="metrics-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', marginBottom: 0 }}>
-              <div className="metric-card">
-                <div className="metric-label">Heart Rate</div>
-                <div className="metric-value" style={{display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem'}}>
-                  <Heart size={20} color="#ef4444" />
-                  {data ? `${data.analysis.hr_bpm} BPM` : '--'}
-                </div>
-              </div>
-              <div className="metric-card">
-                <div className="metric-label">HRV (SDNN)</div>
-                <div className="metric-value">{data ? `${data.analysis.sdnn_ms} ms` : '--'}</div>
-              </div>
-              <div className="metric-card" style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                <div className="metric-label" style={{marginBottom: '0.5rem'}}>Rhythm Status</div>
-                <div className="abnormalities">
-                  {data ? (
-                    data.analysis.abnormalities.map((abn, i) => (
-                      <div key={i} className={`alert ${abn.includes('Normal') ? 'success' : 'danger'}`}>
-                        {abn.includes('Normal') ? <CheckCircle2 size={16}/> : <AlertTriangle size={16}/>}
-                        {abn}
-                      </div>
-                    ))
-                  ) : (<div style={{color: 'var(--text-muted)'}}>Waiting for data...</div>)}
-                </div>
-              </div>
+          {error && (
+            <div
+              style={{
+                color: '#ef4444',
+                marginTop: '0.1rem',
+                fontSize: '0.82rem',
+                lineHeight: 1.4,
+              }}
+            >
+              Error: {error}
             </div>
+          )}
 
-            {/* 3D HEART VIEWER */}
-            <div className="card" style={{ padding: 0, height: '340px', overflow: 'hidden', position: 'relative' }}>
-              <div style={{ position: 'absolute', top: '10px', left: '10px', zIndex: 10, display: 'flex', alignItems: 'center', gap: '8px', pointerEvents: 'none' }}>
-                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#fbbf24', textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>
-                  Live 3D Conduction
-                </span>
-                {/* <span style={{ fontSize: '0.68rem', color: '#38bdf8', background: 'rgba(15,23,42,0.85)', padding: '2px 8px', borderRadius: '9999px', border: '1px solid rgba(56,189,248,0.35)' }}>
-                  Anatomical Landmarks
-                </span> */}
-              </div>
-              <div style={{ position: 'absolute', bottom: '8px', right: '10px', zIndex: 10, fontSize: '0.7rem', color: '#94a3b8', background: 'rgba(15,23,42,0.7)', padding: '2px 8px', borderRadius: '4px', pointerEvents: 'none' }}>
-                Drag to rotate • Scroll to zoom
-              </div>
-              <Canvas camera={{ position: [0, 0, 4.2], fov: 45 }}>
-                <ambientLight intensity={1.2} />
-                <directionalLight position={[5, 10, 7]} intensity={1.8} />
-                <directionalLight position={[-5, -5, -3]} intensity={0.8} />
-                <pointLight position={[0, 2, 4]} intensity={1.2} color="#ffffff" />
-                <Suspense fallback={
-                  <mesh>
-                    <sphereGeometry args={[0.7, 16, 16]} />
-                    <meshStandardMaterial color="#b91c1c" wireframe transparent opacity={0.3} />
-                  </mesh>
-                }>
-                  <HeartModel
-                    phase={playbackState.phase || 'diastole'}
-                    progress={playbackState.phaseProgress || 0}
-                  />
-                </Suspense>
-                <OrbitControls enableZoom={true} autoRotate={!playbackState.isPlaying} autoRotateSpeed={0.8} />
-              </Canvas>
-            </div>
+          <div
+            style={{
+              height: 1,
+              background: 'rgba(148,163,184,0.18)',
+              margin: '0.2rem 0 0.1rem',
+            }}
+          />
+
+          {/* Playback moved into the sidebar to free the main area for the ECG */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.55rem',
+              marginBottom: '-0.25rem',
+            }}
+          >
+            <ActivitySquare size={19} />
+            <h3
+              style={{
+                margin: 0,
+                fontSize: '1rem',
+                color: 'var(--text-primary, #f8fafc)',
+              }}
+            >
+              Playback Controls
+            </h3>
           </div>
 
-          {/* Playback Controls + Stats */}
-          <div className="card" style={{ padding: '1rem', marginBottom: '2rem' }}>
+          <div style={{ minWidth: 0 }}>
             <PlaybackControls
               state={playbackState}
               controls={playbackControls}
               duration={DURATION}
             />
-            <div style={{ marginTop: '0.75rem', borderTop: '1px solid #334155', paddingTop: '0.75rem' }}>
-              <PlaybackStats
-                state={playbackState}
-                duration={DURATION}
-                totalBeats={rPeaks.length}
-              />
+          </div>
+
+          <div
+            style={{
+              marginTop: 'auto',
+              paddingTop: '0.1rem',
+              borderTop: '1px solid rgba(148,163,184,0.12)',
+            }}
+          >
+            <PlaybackStats
+              state={playbackState}
+              duration={DURATION}
+              totalBeats={rPeaks.length}
+            />
+          </div>
+        </aside>
+
+        {/* ───────────────────────── Center analytics ───────────────────────── */}
+        <main
+          style={{
+            minWidth: 0,
+            display: 'grid',
+            gridTemplateRows: 'auto minmax(0, 1fr)',
+            gap: '1.15rem',
+          }}
+        >
+          {/* 3 compact metric cards in ONE row */}
+          <div
+            className="metrics-grid"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+              gap: '0.85rem',
+              margin: 0,
+            }}
+          >
+            <div
+              className="metric-card"
+              style={{
+                ...cardStyle,
+                minHeight: 118,
+                padding: '1.05rem 1.15rem',
+                textAlign: 'left',
+              }}
+            >
+              <div className="metric-label">HEART RATE</div>
+              <div
+                className="metric-value"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'flex-start',
+                  gap: '0.55rem',
+                }}
+              >
+                <Heart size={25} color="#ef4444" />
+                {data ? `${data.analysis.hr_bpm} BPM` : '--'}
+              </div>
+            </div>
+
+            <div
+              className="metric-card"
+              style={{
+                ...cardStyle,
+                minHeight: 118,
+                padding: '1.05rem 1.15rem',
+                textAlign: 'left',
+              }}
+            >
+              <div className="metric-label">HRV (SDNN)</div>
+              <div
+                className="metric-value"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'flex-start',
+                  gap: '0.55rem',
+                }}
+              >
+                <Activity size={25} color="#60a5fa" />
+                {data ? `${data.analysis.sdnn_ms} ms` : '--'}
+              </div>
+            </div>
+
+            <div
+              className="metric-card"
+              style={{
+                ...cardStyle,
+                minHeight: 118,
+                padding: '1.05rem 1.15rem',
+                textAlign: 'left',
+              }}
+            >
+              <div className="metric-label">RHYTHM STATUS</div>
+              <div className="abnormalities" style={{ marginTop: '0.55rem' }}>
+                {data ? (
+                  data.analysis.abnormalities.map((abn, i) => (
+                    <div
+                      key={i}
+                      className={`alert ${
+                        abn.includes('Normal') ? 'success' : 'danger'
+                      }`}
+                      style={{
+                        margin: 0,
+                        fontSize: '0.82rem',
+                        justifyContent: 'flex-start',
+                      }}
+                    >
+                      {abn.includes('Normal') ? (
+                        <CheckCircle2 size={16} />
+                      ) : (
+                        <AlertTriangle size={16} />
+                      )}
+                      {abn}
+                    </div>
+                  ))
+                ) : (
+                  <div style={{ color: 'var(--text-muted)' }}>
+                    Waiting for data...
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* Signal Viewer */}
-          <div className="card" style={{padding: '1rem'}}>
-            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', padding: '0 0.5rem'}}>
-              <h2><ActivitySquare size={24} /> Algorithm Stages</h2>
-              <div className="stage-selector" style={{ marginBottom: 0 }}>
-                {['original', 'bandpass', 'derivative', 'squared', 'integrated'].map(stage => (
-                  <button key={stage} className={`stage-btn ${activeStage === stage ? 'active' : ''}`} onClick={() => setActiveStage(stage)}>
+          {/* ECG stage viewer gets essentially all center-column height */}
+          <section
+            className="card"
+            style={{
+              ...cardStyle,
+              minHeight: 0,
+              padding: '0.9rem',
+              display: 'grid',
+              gridTemplateRows: 'auto minmax(0, 1fr)',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: '1rem',
+                marginBottom: '0.8rem',
+                padding: '0 0.25rem',
+                flexWrap: 'wrap',
+              }}
+            >
+              <h2
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.55rem',
+                  margin: 0,
+                }}
+              >
+                <ActivitySquare size={22} />
+                Algorithm Stages
+              </h2>
+
+              <div
+                className="stage-selector"
+                style={{
+                  marginBottom: 0,
+                  display: 'flex',
+                  gap: '0.2rem',
+                  flexWrap: 'wrap',
+                  justifyContent: 'flex-end',
+                }}
+              >
+                {[
+                  'original',
+                  'bandpass',
+                  'derivative',
+                  'squared',
+                  'integrated',
+                ].map((stage) => (
+                  <button
+                    key={stage}
+                    className={`stage-btn ${
+                      activeStage === stage ? 'active' : ''
+                    }`}
+                    onClick={() => setActiveStage(stage)}
+                  >
                     {stage.charAt(0).toUpperCase() + stage.slice(1)}
                   </button>
                 ))}
               </div>
             </div>
 
-            <div className="plot-container">
-              {loading && <div className="loading-overlay"><Activity size={32} /><span>Processing Signal...</span></div>}
+            <div
+              className="plot-container"
+              style={{
+                position: 'relative',
+                minHeight: 0,
+                height: '100%',
+                overflow: 'hidden',
+              }}
+            >
+              {loading && (
+                <div className="loading-overlay">
+                  <Activity size={32} />
+                  <span>Processing Signal...</span>
+                </div>
+              )}
               {renderPlot()}
             </div>
+          </section>
+        </main>
+
+        {/* ───────────────────────── Right 3D heart ───────────────────────── */}
+        <section
+          className="card"
+          style={{
+            ...cardStyle,
+            padding: 0,
+            position: 'relative',
+            overflow: 'hidden',
+            minHeight: 0,
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          <div
+            style={{
+              position: 'absolute',
+              top: '0.95rem',
+              left: '1rem',
+              right: '1rem',
+              zIndex: 10,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              pointerEvents: 'none',
+            }}
+          >
+            <span
+              style={{
+                fontSize: '0.95rem',
+                fontWeight: 700,
+                color: '#fbbf24',
+                textShadow: '0 2px 6px rgba(0,0,0,0.55)',
+              }}
+            >
+              Live 3D Cardiac Conduction
+            </span>
+
+            {/* <button
+              type="button"
+              aria-label="Expand heart viewer"
+              title="Expand heart viewer"
+              style={{
+                pointerEvents: 'auto',
+                width: 34,
+                height: 34,
+                borderRadius: 10,
+                border: '1px solid rgba(148,163,184,0.45)',
+                background: 'rgba(15,23,42,0.78)',
+                color: '#e2e8f0',
+                display: 'grid',
+                placeItems: 'center',
+                cursor: 'pointer',
+              }}
+              onClick={() => {}}
+            >
+              <Maximize2 size={17} />
+            </button> */}
           </div>
-        </div>
+
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <Canvas
+              camera={{
+                position: [0, 0, 4.5],
+                fov: 42,
+              }}
+              dpr={[1, 2]}
+              gl={{ antialias: true, alpha: true }}
+            >
+              <ambientLight intensity={1.15} />
+              <directionalLight position={[5, 10, 7]} intensity={1.8} />
+              <directionalLight position={[-5, -5, -3]} intensity={0.75} />
+              <pointLight
+                position={[0, 2, 4]}
+                intensity={1.35}
+                color="#ffffff"
+              />
+
+              <Suspense
+                fallback={
+                  <mesh>
+                    <sphereGeometry args={[0.7, 16, 16]} />
+                    <meshStandardMaterial
+                      color="#b91c1c"
+                      wireframe
+                      transparent
+                      opacity={0.3}
+                    />
+                  </mesh>
+                }
+              >
+                <HeartModel
+                  phase={playbackState.phase || 'diastole'}
+                  progress={playbackState.phaseProgress || 0}
+                />
+              </Suspense>
+
+              <OrbitControls
+                enableZoom={true}
+                autoRotate={!playbackState.isPlaying}
+                autoRotateSpeed={0.55}
+                minDistance={2.9}
+                maxDistance={6}
+                target={[0, 0, 0]}
+              />
+            </Canvas>
+          </div>
+
+          <div
+            style={{
+              position: 'absolute',
+              bottom: '0.85rem',
+              left: '1rem',
+              zIndex: 10,
+              fontSize: '0.68rem',
+              color: '#94a3b8',
+              background: 'rgba(15,23,42,0.72)',
+              padding: '0.3rem 0.55rem',
+              borderRadius: 7,
+              pointerEvents: 'none',
+            }}
+          >
+            Drag to rotate • Scroll to zoom
+          </div>
+        </section>
       </div>
+
+      {/* Small-screen fallback */}
+      <style>{`
+        @media (max-width: 1200px) {
+          .dashboard-grid {
+            grid-template-columns: minmax(240px, 270px) minmax(0, 1fr) !important;
+          }
+
+          .dashboard-grid > section:last-child {
+            grid-column: 1 / -1;
+            min-height: 600px;
+          }
+        }
+
+        @media (max-width: 800px) {
+          .header {
+            flex-direction: column;
+            align-items: flex-start !important;
+          }
+
+          .dashboard-grid {
+            grid-template-columns: 1fr !important;
+          }
+
+          .dashboard-grid > section:last-child {
+            grid-column: auto;
+            min-height: 560px;
+          }
+
+          .metrics-grid {
+            grid-template-columns: 1fr !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
