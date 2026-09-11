@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
-import Plot from 'react-plotly.js';
+import React, { useState, useEffect, useMemo, useCallback, useRef, Suspense } from 'react';
 import {
   Activity,
   Heart,
@@ -25,6 +24,8 @@ import { OrbitControls } from '@react-three/drei';
 import HeartModel from './HeartModel';
 import PlaybackControls from './components/Playback/PlaybackControls';
 import PlaybackStats from './components/Playback/PlaybackStats';
+import ECGPlot from './components/ECGPlot/ECGPlot';
+import PlaybackCursor from './components/ECGPlot/PlaybackCursor';
 import EvaluationPanel from './components/Evaluation/EvaluationPanel';
 import './index.css';
 
@@ -154,6 +155,7 @@ function App() {
   const [selectedBeatIndex, setSelectedBeatIndex] = useState(0);
   const [xRange, setXRange] = useState([0, DURATION]);
   const [isEvidenceOpen, setIsEvidenceOpen] = useState(true);
+  const plotContainerRef = useRef(null);
 
   // Diagnostic overlay visibility toggles
   const [showRefractory, setShowRefractory] = useState(true);
@@ -293,517 +295,6 @@ function App() {
       setXRange([0, DURATION]);
     }
   }, []);
-
-  const renderPlot = () => {
-    if (!data || !data.stages) return null;
-
-    const signalData = data.stages[activeStage];
-    if (!signalData || !Array.isArray(signalData)) return null;
-
-    const timeAxis = Array.from({ length: signalData.length }, (_, i) => i / fs);
-
-    const plotData = [
-      {
-        x: timeAxis,
-        y: signalData,
-        type: 'scatter',
-        mode: 'lines',
-        name: `${activeStage.charAt(0).toUpperCase() + activeStage.slice(1)} Signal`,
-        line: { color: STAGE_CONFIG[activeStage]?.color || '#3b82f6', width: 2 },
-        hoverinfo: 'x+y',
-      },
-    ];
-
-    const shapes = [];
-    const annotations = [];
-
-    const delineatedBeats = data.delineation || [];
-    const currentBeat = delineatedBeats[selectedBeatIndex] || delineatedBeats[0];
-
-    // -------------------------------------------------------------
-    // Diagnostic Overlay 1: Refractory Intervals (200 ms shaded region)
-    // -------------------------------------------------------------
-    if (showRefractory) {
-      const intervals = (data.stages.refractory_intervals && data.stages.refractory_intervals.length > 0)
-        ? data.stages.refractory_intervals
-        : (data.stages.peaks_original || []).map((p) => [p, Math.min(signalData.length, p + Math.round(0.200 * fs))]);
-
-      intervals.forEach(([startSample, endSample]) => {
-        shapes.push({
-          type: 'rect',
-          xref: 'x',
-          yref: 'paper',
-          x0: startSample / fs,
-          x1: endSample / fs,
-          y0: 0,
-          y1: 1,
-          fillcolor: 'rgba(239, 68, 68, 0.08)',
-          line: { color: 'rgba(239, 68, 68, 0.22)', width: 1, dash: 'dot' },
-          layer: 'below',
-        });
-      });
-
-      plotData.push({
-        x: [null],
-        y: [null],
-        type: 'scatter',
-        mode: 'markers',
-        name: '200 ms Refractory Blanking',
-        marker: {
-          symbol: 'square',
-          color: 'rgba(239, 68, 68, 0.45)',
-          size: 9,
-          line: { color: '#ef4444', width: 1 },
-        },
-      });
-    }
-
-    // -------------------------------------------------------------
-    // Diagnostic Overlay 2: Search-Back Detections (Amber marker + "Search-back" label)
-    // -------------------------------------------------------------
-    if (showSearchback && data.stages.searchback && data.stages.searchback.length > 0) {
-      const validSb = data.stages.searchback.filter((p) => p < signalData.length);
-      if (validSb.length > 0) {
-        plotData.push({
-          x: validSb.map((p) => p / fs),
-          y: validSb.map((p) => signalData[p]),
-          type: 'scatter',
-          mode: 'markers+text',
-          name: 'Search-back Detections',
-          text: validSb.map(() => '<b>Search-back</b>'),
-          textposition: 'top center',
-          textfont: { color: '#f59e0b', size: 11, family: 'Inter, sans-serif' },
-          marker: {
-            color: '#f59e0b',
-            size: 11,
-            symbol: 'diamond',
-            line: { color: '#ffffff', width: 2 },
-          },
-          hoverinfo: 'text+x+y',
-          hovertext: validSb.map((p) => `Search-back QRS: ${(p / fs).toFixed(3)} s (Sample ${p})`),
-        });
-      }
-    }
-
-    // -------------------------------------------------------------
-    // Diagnostic Overlay 3: T-Wave Rejection (Hollow marker + tooltip "Rejected: T-wave")
-    // -------------------------------------------------------------
-    if (showRejectedT && data.stages.rejected_t_waves && data.stages.rejected_t_waves.length > 0) {
-      const validRejected = data.stages.rejected_t_waves.filter((p) => p < signalData.length);
-      if (validRejected.length > 0) {
-        plotData.push({
-          x: validRejected.map((p) => p / fs),
-          y: validRejected.map((p) => signalData[p]),
-          type: 'scatter',
-          mode: 'markers',
-          name: 'Rejected: T-wave',
-          marker: {
-            color: '#c084fc',
-            size: 8,
-            symbol: 'circle-open',
-            line: { color: '#c084fc', width: 2 },
-          },
-          hoverinfo: 'text+x+y',
-          hovertext: validRejected.map(() => 'Rejected: T-wave'),
-        });
-      }
-    }
-
-    if (activeStage === 'original') {
-      const searchbackSet = new Set(data.stages.searchback || []);
-
-      // 1. Shaded QRS region and boundary lines for the selected beat (when Delineation is ON)
-      if (showDelineation && currentBeat && typeof currentBeat.qrs_onset_time === 'number' && typeof currentBeat.qrs_offset_time === 'number') {
-        // Subtle shaded QRS region from onset to offset
-        shapes.push({
-          type: 'rect',
-          xref: 'x',
-          yref: 'paper',
-          x0: currentBeat.qrs_onset_time,
-          x1: currentBeat.qrs_offset_time,
-          y0: 0,
-          y1: 1,
-          fillcolor: 'rgba(59, 130, 246, 0.16)',
-          line: { color: 'rgba(59, 130, 246, 0.45)', width: 1.5, dash: 'dot' },
-          layer: 'below',
-        });
-
-        // Vertical boundary line for QRS Onset
-        shapes.push({
-          type: 'line',
-          xref: 'x',
-          yref: 'paper',
-          x0: currentBeat.qrs_onset_time,
-          x1: currentBeat.qrs_onset_time,
-          y0: 0,
-          y1: 0.95,
-          line: { color: '#10b981', width: 1.5, dash: 'dash' },
-        });
-
-        // Vertical boundary line for QRS Offset
-        shapes.push({
-          type: 'line',
-          xref: 'x',
-          yref: 'paper',
-          x0: currentBeat.qrs_offset_time,
-          x1: currentBeat.qrs_offset_time,
-          y0: 0,
-          y1: 0.95,
-          line: { color: '#06b6d4', width: 1.5, dash: 'dash' },
-        });
-
-        // Horizontal local isoelectric baseline
-        if (typeof currentBeat.isoelectric_baseline === 'number') {
-          shapes.push({
-            type: 'line',
-            xref: 'x',
-            yref: 'y',
-            x0: Math.max(0, currentBeat.qrs_onset_time - 0.08),
-            x1: Math.min(DURATION, currentBeat.qrs_offset_time + 0.08),
-            y0: currentBeat.isoelectric_baseline,
-            y1: currentBeat.isoelectric_baseline,
-            line: { color: 'rgba(148, 163, 184, 0.35)', width: 1, dash: 'dot' },
-            layer: 'below',
-          });
-        }
-
-        // Small non-overlapping annotation for Onset
-        annotations.push({
-          x: currentBeat.qrs_onset_time,
-          y: 0.04,
-          yref: 'paper',
-          text: '<b>Onset ↑</b>',
-          showarrow: false,
-          font: { color: '#10b981', size: 10, family: 'Inter, sans-serif' },
-          bgcolor: 'rgba(15, 23, 42, 0.85)',
-          bordercolor: '#10b981',
-          borderwidth: 1,
-          borderpad: 2,
-        });
-
-        // Small non-overlapping annotation for Offset
-        annotations.push({
-          x: currentBeat.qrs_offset_time,
-          y: 0.04,
-          yref: 'paper',
-          text: '<b>Offset ↑</b>',
-          showarrow: false,
-          font: { color: '#06b6d4', size: 10, family: 'Inter, sans-serif' },
-          bgcolor: 'rgba(15, 23, 42, 0.85)',
-          bordercolor: '#06b6d4',
-          borderwidth: 1,
-          borderpad: 2,
-        });
-
-        // Q Point marker
-        if (currentBeat.q_index != null && typeof currentBeat.q_time === 'number') {
-          plotData.push({
-            x: [currentBeat.q_time],
-            y: [signalData[currentBeat.q_index]],
-            type: 'scatter',
-            mode: 'markers+text',
-            name: 'Q Point',
-            text: ['<b>Q</b>'],
-            textposition: 'bottom left',
-            textfont: { color: '#f59e0b', size: 11, family: 'Inter, sans-serif' },
-            marker: {
-              color: '#f59e0b',
-              size: 9,
-              symbol: 'circle',
-              line: { color: '#ffffff', width: 1.5 },
-            },
-          });
-        }
-
-        // R Peak marker (or QS nadir if inverted)
-        if (currentBeat.r_index != null && typeof currentBeat.r_time === 'number') {
-          plotData.push({
-            x: [currentBeat.r_time],
-            y: [signalData[currentBeat.r_index]],
-            type: 'scatter',
-            mode: 'markers+text',
-            name: 'R Peak',
-            text: ['<b>R</b>'],
-            textposition: 'top center',
-            textfont: { color: '#ef4444', size: 12, family: 'Inter, sans-serif' },
-            marker: {
-              color: '#ef4444',
-              size: 11,
-              symbol: 'circle',
-              line: { color: '#ffffff', width: 2 },
-            },
-          });
-        } else if (currentBeat.dominant_deflection_index != null) {
-          plotData.push({
-            x: [currentBeat.dominant_deflection_index / fs],
-            y: [signalData[currentBeat.dominant_deflection_index]],
-            type: 'scatter',
-            mode: 'markers+text',
-            name: 'QS Nadir',
-            text: ['<b>QS</b>'],
-            textposition: 'bottom center',
-            textfont: { color: '#ec4899', size: 11, family: 'Inter, sans-serif' },
-            marker: {
-              color: '#ec4899',
-              size: 11,
-              symbol: 'diamond',
-              line: { color: '#ffffff', width: 2 },
-            },
-          });
-        }
-
-        // S Point marker
-        if (currentBeat.s_index != null && typeof currentBeat.s_time === 'number') {
-          plotData.push({
-            x: [currentBeat.s_time],
-            y: [signalData[currentBeat.s_index]],
-            type: 'scatter',
-            mode: 'markers+text',
-            name: 'S Point',
-            text: ['<b>S</b>'],
-            textposition: 'bottom right',
-            textfont: { color: '#38bdf8', size: 11, family: 'Inter, sans-serif' },
-            marker: {
-              color: '#38bdf8',
-              size: 9,
-              symbol: 'circle',
-              line: { color: '#ffffff', width: 1.5 },
-            },
-          });
-        }
-
-        // Onset marker
-        if (currentBeat.qrs_onset_index != null) {
-          plotData.push({
-            x: [currentBeat.qrs_onset_time],
-            y: [signalData[currentBeat.qrs_onset_index]],
-            type: 'scatter',
-            mode: 'markers',
-            name: 'QRS Onset Marker',
-            marker: {
-              color: '#10b981',
-              size: 7,
-              symbol: 'circle',
-            },
-            showlegend: false,
-          });
-        }
-
-        // Offset marker
-        if (currentBeat.qrs_offset_index != null) {
-          plotData.push({
-            x: [currentBeat.qrs_offset_time],
-            y: [signalData[currentBeat.qrs_offset_index]],
-            type: 'scatter',
-            mode: 'markers',
-            name: 'QRS Offset Marker',
-            marker: {
-              color: '#06b6d4',
-              size: 7,
-              symbol: 'circle',
-            },
-            showlegend: false,
-          });
-        }
-      }
-
-      // 2. Subtle markers for other primary beats across the 10-second sweep
-      if (data.stages.peaks_original) {
-        const otherNormal = data.stages.peaks_original.filter(
-          (p) => !searchbackSet.has(p) && (showDelineation && currentBeat ? p !== currentBeat.pt_qrs_index && p !== currentBeat.r_index : true)
-        );
-
-        if (otherNormal.length > 0) {
-          plotData.push({
-            x: otherNormal.map((p) => p / fs),
-            y: otherNormal.map((p) => signalData[p]),
-            type: 'scatter',
-            mode: 'markers',
-            name: 'Primary QRS Peaks',
-            marker: {
-              color: 'rgba(239, 68, 68, 0.45)',
-              size: 8,
-              symbol: 'circle-open',
-              line: { width: 1.5, color: '#ef4444' },
-            },
-          });
-        }
-      }
-    } else if (activeStage === 'integrated') {
-      // Visual representation of moving-window width on the integrated stage
-      const winSec = windowSize / 1000;
-      const winSamples = Math.round(winSec * fs);
-      const winStart = 0.35;
-      const winEnd = winStart + winSec;
-
-      shapes.push({
-        type: 'rect',
-        xref: 'x',
-        yref: 'paper',
-        x0: winStart,
-        x1: winEnd,
-        y0: 0.82,
-        y1: 0.96,
-        fillcolor: 'rgba(16, 185, 129, 0.22)',
-        line: { color: '#10b981', width: 1.5, dash: 'solid' },
-      });
-
-      annotations.push({
-        x: (winStart + winEnd) / 2,
-        y: 0.89,
-        yref: 'paper',
-        text: `<b>← Moving Window: ${windowSize} ms (${winSamples} samples) →</b>`,
-        showarrow: false,
-        font: { color: '#10b981', size: 10, family: 'Inter, sans-serif' },
-        bgcolor: 'rgba(15, 23, 42, 0.85)',
-        bordercolor: '#10b981',
-        borderwidth: 1,
-        borderpad: 3,
-      });
-
-      // Adaptive threshold curves (Toggleable)
-      if (showThresholds) {
-        if (data.stages.threshold_i1) {
-          plotData.push({
-            x: timeAxis,
-            y: data.stages.threshold_i1,
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Threshold I1 (Primary)',
-            line: { color: '#f59e0b', width: 2 },
-          });
-        }
-        if (data.stages.threshold_i2) {
-          plotData.push({
-            x: timeAxis,
-            y: data.stages.threshold_i2,
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Threshold I2 (Search-back)',
-            line: { color: '#fbbf24', width: 1.5, dash: 'dash' },
-          });
-        }
-      }
-
-      if (data.stages.peaks_integrated && data.stages.peaks_integrated.length > 0) {
-        plotData.push({
-          x: data.stages.peaks_integrated.map((p) => p / fs),
-          y: data.stages.peaks_integrated.map((p) => signalData[p]),
-          type: 'scatter',
-          mode: 'markers',
-          name: 'Integrated Energy Peaks',
-          marker: {
-            color: '#10b981',
-            size: 8,
-            symbol: 'circle',
-          },
-        });
-      }
-    } else if (activeStage === 'bandpass') {
-      // Adaptive threshold curves (Toggleable)
-      if (showThresholds) {
-        if (data.stages.threshold_f1) {
-          plotData.push({
-            x: timeAxis,
-            y: data.stages.threshold_f1,
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Threshold F1 (Primary)',
-            line: { color: '#f59e0b', width: 2 },
-          });
-        }
-        if (data.stages.threshold_f2) {
-          plotData.push({
-            x: timeAxis,
-            y: data.stages.threshold_f2,
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Threshold F2 (Search-back)',
-            line: { color: '#fbbf24', width: 1.5, dash: 'dash' },
-          });
-        }
-      }
-    }
-
-    const [xMin, xMax] = xRange;
-    const currentT = playbackState.currentTime;
-    const inView = currentT >= xMin && currentT <= xMax;
-    const pct = inView && xMax > xMin ? (currentT - xMin) / (xMax - xMin) : null;
-
-    return (
-      <div
-        style={{
-          position: 'relative',
-          width: '100%',
-          height: '100%',
-          minHeight: 0,
-        }}
-      >
-        <Plot
-          data={plotData}
-          layout={{
-            autosize: true,
-            uirevision: selectedRecord,
-            margin: { l: 58, r: 18, t: 18, b: 52 },
-            paper_bgcolor: 'transparent',
-            plot_bgcolor: 'transparent',
-            font: { color: '#94a3b8' },
-            xaxis: {
-              title: { text: 'Time (seconds)', standoff: 10 },
-              gridcolor: '#334155',
-              zerolinecolor: '#334155',
-              range: xRange,
-              fixedrange: false,
-            },
-            yaxis: {
-              title: { text: 'Amplitude (mV / arbitrary units)', standoff: 8 },
-              gridcolor: '#334155',
-              zerolinecolor: '#334155',
-              fixedrange: false,
-            },
-            shapes: shapes,
-            annotations: annotations,
-            showlegend: true,
-            legend: {
-              orientation: 'h',
-              x: 0,
-              y: 1.14,
-              font: { color: '#94a3b8', size: 10 },
-              bgcolor: 'rgba(15,23,42,0.6)',
-            },
-          }}
-          useResizeHandler={true}
-          style={{ width: '100%', height: '100%' }}
-          config={{
-            responsive: true,
-            displayModeBar: true,
-            modeBarButtonsToRemove: ['lasso2d', 'select2d'],
-            displaylogo: false,
-          }}
-          onClick={handlePlotClick}
-          onRelayout={handleRelayout}
-        />
-
-        {/* Playback cursor */}
-        {pct !== null && (
-          <div
-            style={{
-              position: 'absolute',
-              top: 18,
-              bottom: 52,
-              left: `calc(58px + (100% - 76px) * ${pct})`,
-              width: 2,
-              backgroundColor: '#ef4444',
-              zIndex: 10,
-              boxShadow: '0 0 10px rgba(239,68,68,0.8)',
-              pointerEvents: 'none',
-              transition: 'none',
-            }}
-          />
-        )}
-      </div>
-    );
-  };
 
   const cardStyle = {
     background: 'var(--card-bg, #1b263b)',
@@ -1542,6 +1033,7 @@ function App() {
 
             {/* ECG Plot Container */}
             <div
+              ref={plotContainerRef}
               className="plot-container"
               style={{
                 position: 'relative',
@@ -1557,7 +1049,28 @@ function App() {
                   <span>Processing Signal...</span>
                 </div>
               )}
-              {renderPlot()}
+              <ECGPlot
+                data={data}
+                activeStage={activeStage}
+                selectedBeatIndex={selectedBeatIndex}
+                showRefractory={showRefractory}
+                showSearchback={showSearchback}
+                showRejectedT={showRejectedT}
+                showThresholds={showThresholds}
+                showDelineation={showDelineation}
+                windowSize={windowSize}
+                fs={fs}
+                xRange={xRange}
+                selectedRecord={selectedRecord}
+                stageConfig={STAGE_CONFIG}
+                onPlotClick={handlePlotClick}
+                onRelayout={handleRelayout}
+              />
+              <PlaybackCursor
+                currentTime={playbackState.currentTime}
+                xRange={xRange}
+                containerRef={plotContainerRef}
+              />
             </div>
 
             {/* Selected-Beat Information Panel & Pan-Tompkins Evidence */}

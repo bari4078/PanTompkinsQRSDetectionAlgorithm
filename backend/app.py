@@ -32,11 +32,13 @@ class ProcessRequest(BaseModel):
     highcut: float = 15.0
 
 @app.get("/api/records")
+@app.get("/records")
 def get_records():
     """Returns a list of available MIT-BIH record IDs."""
     return {"records": data_loader.get_available_records()}
 
 @app.post("/api/process")
+@app.post("/process")
 def process_record(req: ProcessRequest):
     """
     Fetches the requested record, processes it through the Pan-Tompkins algorithm,
