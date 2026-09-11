@@ -5,6 +5,7 @@ import uvicorn
 
 from data_loader import DataLoader
 from pan_tompkins.detector import PanTompkinsDetector
+from delineation.qrs_delineator import QRSDelineator
 from analysis import analyze_ecg
 
 app = FastAPI(title="Pan-Tompkins API", description="API for ECG Processing and Analysis")
@@ -58,7 +59,20 @@ def process_record(req: ProcessRequest):
         # 3. Process the signal
         stages = detector.process(signal, fs)
 
-        # 4. Analyze the detected peaks for advanced metrics
+        # 4. QRS Delineation / Morphological Landmark Estimation
+        # NOTE: Delineation of individual Q, R, S waves, and QRS onset/offset is an
+        # application-specific downstream morphology layer and NOT part of the original
+        # 1985 Pan-Tompkins algorithm.
+        delineator = QRSDelineator()
+        delineation = delineator.delineate_beats(
+            signal=signal,
+            fs=fs,
+            qrs_indices=stages['peaks_original'],
+            detection_metadata=stages
+        )
+        stages['delineation'] = delineation
+
+        # 5. Analyze the detected peaks for advanced metrics
         analysis = analyze_ecg(stages['peaks_original'], fs)
 
         # Return everything as JSON
@@ -84,7 +98,8 @@ def process_record(req: ProcessRequest):
             "fs": fs,
             "stages": stages,
             "analysis": analysis,
-            "metadata": metadata
+            "metadata": metadata,
+            "delineation": delineation
         }
     except Exception as e:
         # Return a 500 Internal Server Error if something goes wrong (e.g. invalid record)
