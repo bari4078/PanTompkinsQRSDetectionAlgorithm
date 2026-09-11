@@ -61,27 +61,29 @@ export default function PlaybackControls({ state = {}, controls = {}, duration =
     border: '1px solid #334155',
     color: '#f8fafc',
     borderRadius: '6px',
-    padding: '6px 10px',
+    padding: '6px 8px',
     cursor: 'pointer',
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: '6px',
-    fontSize: '0.85rem',
+    gap: '5px',
+    fontSize: '0.8rem',
     fontWeight: 500,
     lineHeight: 1,
     transition: 'background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease',
     userSelect: 'none',
+    boxSizing: 'border-box',
   };
 
-  // Highlighted play button (slightly larger)
+  // Highlighted play button
   const playButtonStyle = {
     ...baseButtonStyle,
     background: '#10b981',
     borderColor: '#10b981',
     color: '#ffffff',
-    padding: '7px 14px',
+    padding: '7px 10px',
     fontWeight: 600,
+    width: '100%',
   };
 
   // Stop button
@@ -90,23 +92,25 @@ export default function PlaybackControls({ state = {}, controls = {}, duration =
     background: '#ef4444',
     borderColor: '#ef4444',
     color: '#ffffff',
-    padding: '6px 12px',
+    padding: '7px 10px',
     fontWeight: 600,
+    width: '100%',
   };
 
   // Determine speed button styling depending on active playback rate
   const getSpeedButtonStyle = (rate) => {
     const isActive = Math.abs(playbackRate - rate) < 0.001;
-    if (isActive) {
-      return {
-        ...baseButtonStyle,
-        background: '#3b82f6',
-        borderColor: '#3b82f6',
-        color: '#ffffff',
-        fontWeight: 600,
-      };
-    }
-    return baseButtonStyle;
+    return {
+      ...baseButtonStyle,
+      padding: '5px 2px',
+      fontSize: '0.78rem',
+      fontWeight: isActive ? 600 : 500,
+      background: isActive ? '#3b82f6' : '#0f172a',
+      borderColor: isActive ? '#3b82f6' : '#334155',
+      color: '#ffffff',
+      width: '100%',
+      textAlign: 'center',
+    };
   };
 
   return (
@@ -115,129 +119,137 @@ export default function PlaybackControls({ state = {}, controls = {}, duration =
         background: 'transparent',
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.75rem',
+        gap: '0.5rem',
         width: '100%',
       }}
     >
-      {/* Row 1: Transport buttons and speed selector */}
+      {/* Row 1: Play / Pause & Stop primary actions */}
       <div
         style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: '0.75rem',
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: '6px',
+          width: '100%',
         }}
       >
-        {/* Left group: Transport buttons */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: '0.375rem',
-          }}
+        {/* Play / Pause toggle */}
+        <button
+          type="button"
+          style={playButtonStyle}
+          onClick={handleTogglePlay}
+          title={isPlaying ? 'Pause playback' : 'Start playback'}
+          aria-label={isPlaying ? 'Pause' : 'Play'}
         >
-          {/* |◀ : stepBeat(-1) — jump to previous R-peak */}
-          <button
-            type="button"
-            style={baseButtonStyle}
-            onClick={() => stepBeat(-1)}
-            title="Previous Beat (Jump to previous R-peak)"
-            aria-label="Previous beat"
-          >
-            <SkipBack size={16} />
-          </button>
+          {isPlaying ? (
+            <>
+              <Pause size={15} />
+              <span>Pause</span>
+            </>
+          ) : (
+            <>
+              <Play size={15} fill="currentColor" />
+              <span>Play</span>
+            </>
+          )}
+        </button>
 
-          {/* ◀ : stepSample(-1) — step back one sample */}
-          <button
-            type="button"
-            style={baseButtonStyle}
-            onClick={() => stepSample(-1)}
-            title="Step back one sample"
-            aria-label="Step back one sample"
-          >
-            <ChevronLeft size={16} />
-          </button>
-
-          {/* ▶ / ❚❚ : play/pause toggle — slightly larger/highlighted */}
-          <button
-            type="button"
-            style={playButtonStyle}
-            onClick={handleTogglePlay}
-            title={isPlaying ? 'Pause' : 'Play'}
-            aria-label={isPlaying ? 'Pause' : 'Play'}
-          >
-            {isPlaying ? <Pause size={18} /> : <Play size={18} fill="currentColor" />}
-          </button>
-
-          {/* ▶ : stepSample(+1) — step forward one sample */}
-          <button
-            type="button"
-            style={baseButtonStyle}
-            onClick={() => stepSample(1)}
-            title="Step forward one sample"
-            aria-label="Step forward one sample"
-          >
-            <ChevronRight size={16} />
-          </button>
-
-          {/* ▶| : stepBeat(+1) — jump to next R-peak */}
-          <button
-            type="button"
-            style={baseButtonStyle}
-            onClick={() => stepBeat(1)}
-            title="Next Beat (Jump to next R-peak)"
-            aria-label="Next beat"
-          >
-            <SkipForward size={16} />
-          </button>
-
-          {/* Spacer before stop button */}
-          <div style={{ width: '0.375rem' }} />
-
-          {/* ■ : stop (reset to beginning) */}
-          <button
-            type="button"
-            style={stopButtonStyle}
-            onClick={stop}
-            title="Stop and reset to beginning"
-            aria-label="Stop playback"
-          >
-            <Square size={14} fill="currentColor" />
-            <span>Stop</span>
-          </button>
-        </div>
-
-        {/* Right group: Speed selector buttons */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.375rem',
-          }}
+        {/* Stop (reset to beginning) */}
+        <button
+          type="button"
+          style={stopButtonStyle}
+          onClick={stop}
+          title="Stop and reset to beginning"
+          aria-label="Stop playback"
         >
-          {SPEED_OPTIONS.map((rate) => (
-            <button
-              key={rate}
-              type="button"
-              style={getSpeedButtonStyle(rate)}
-              onClick={() => setPlaybackRate(rate)}
-              title={`Playback speed ${rate}×`}
-              aria-label={`Playback speed ${rate}x`}
-            >
-              {rate}×
-            </button>
-          ))}
-        </div>
+          <Square size={13} fill="currentColor" />
+          <span>Stop</span>
+        </button>
       </div>
 
-      {/* Row 2: Timeline slider */}
+      {/* Row 2: Step & Beat navigation buttons */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, 1fr)',
+          gap: '4px',
+          width: '100%',
+        }}
+      >
+        {/* |◀ : stepBeat(-1) — jump to previous R-peak */}
+        <button
+          type="button"
+          style={{ ...baseButtonStyle, width: '100%', padding: '6px 0' }}
+          onClick={() => stepBeat(-1)}
+          title="Previous Beat (Jump to previous R-peak)"
+          aria-label="Previous beat"
+        >
+          <SkipBack size={15} />
+        </button>
+
+        {/* ◀ : stepSample(-1) — step back one sample */}
+        <button
+          type="button"
+          style={{ ...baseButtonStyle, width: '100%', padding: '6px 0' }}
+          onClick={() => stepSample(-1)}
+          title="Step back one sample"
+          aria-label="Step back one sample"
+        >
+          <ChevronLeft size={15} />
+        </button>
+
+        {/* ▶ : stepSample(+1) — step forward one sample */}
+        <button
+          type="button"
+          style={{ ...baseButtonStyle, width: '100%', padding: '6px 0' }}
+          onClick={() => stepSample(1)}
+          title="Step forward one sample"
+          aria-label="Step forward one sample"
+        >
+          <ChevronRight size={15} />
+        </button>
+
+        {/* ▶| : stepBeat(+1) — jump to next R-peak */}
+        <button
+          type="button"
+          style={{ ...baseButtonStyle, width: '100%', padding: '6px 0' }}
+          onClick={() => stepBeat(1)}
+          title="Next Beat (Jump to next R-peak)"
+          aria-label="Next beat"
+        >
+          <SkipForward size={15} />
+        </button>
+      </div>
+
+      {/* Row 3: Speed selector buttons (compact grid, decreased gap) */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, 1fr)',
+          gap: '4px',
+          width: '100%',
+        }}
+      >
+        {SPEED_OPTIONS.map((rate) => (
+          <button
+            key={rate}
+            type="button"
+            style={getSpeedButtonStyle(rate)}
+            onClick={() => setPlaybackRate(rate)}
+            title={`Playback speed ${rate}×`}
+            aria-label={`Playback speed ${rate}x`}
+          >
+            {rate}×
+          </button>
+        ))}
+      </div>
+
+      {/* Row 4: Timeline slider */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           width: '100%',
+          marginTop: '0.1rem',
         }}
       >
         <input

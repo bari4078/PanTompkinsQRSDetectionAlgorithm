@@ -100,7 +100,7 @@ Raw ECG [x(n)]
 ```
 
 ### Phase 1: Bandpass Filtering (5–15 Hz)
-The energy of the QRS complex is primarily concentrated between 5 Hz and 15 Hz. 
+The energy of the QRS complex is primarily concentrated between 5 Hz and 15 Hz.
 - Low frequencies (< 5 Hz) caused by respiratory baseline drift and P/T wave fluctuations are attenuated.
 - High frequencies (> 15 Hz) corresponding to powerline interference, 60 Hz hum, and electromyographic (EMG) noise are eliminated.
 Implemented using a cascaded Butterworth bandpass filter.
@@ -312,3 +312,13 @@ Executes the Pan-Tompkins pipeline and arrhythmia diagnostic engine on a specifi
 1. **Pan, J., & Tompkins, W. J.** (1985). *A Real-Time QRS Detection Algorithm*. IEEE Transactions on Biomedical Engineering, BME-32(3), 230–236.
 2. **Moody, G. B., & Mark, R. G.** (2001). *The impact of the MIT-BIH Arrhythmia Database*. IEEE Engineering in Medicine and Biology Magazine, 20(3), 45–50.
 3. **Goldberger, A. L., et al.** (2000). *PhysioBank, PhysioToolkit, and PhysioNet: Components of a new research resource for complex physiologic signals*. Circulation, 101(23), e215–e220.
+
+
+
+## Project Developed by:
+- Abid M Bari
+- Shadman Shahriar Shuvo
+
+
+## GitHub repo:
+[bari4078/PanTompkinsQRSDetectionAlgorithm](https://github.com/bari4078/PanTompkinsQRSDetectionAlgorithm)

@@ -267,7 +267,7 @@ function App() {
         style={{
           display: 'grid',
           gridTemplateColumns:
-            'minmax(260px, 290px) minmax(520px, 1fr) minmax(380px, 430px)',
+            'minmax(200px, 220px) minmax(520px, 1fr) minmax(380px, 430px)',
           gap: '1.15rem',
           alignItems: 'stretch',
         }}
@@ -277,11 +277,11 @@ function App() {
           className="card"
           style={{
             ...cardStyle,
-            padding: '1rem',
+            padding: '0.85rem 0.8rem',
             alignSelf: 'stretch',
             display: 'flex',
             flexDirection: 'column',
-            gap: '0.5rem',
+            gap: '0.45rem',
           }}
         >
           <div>
@@ -289,11 +289,12 @@ function App() {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '0.6rem',
+                gap: '0.5rem',
                 margin: 0,
+                fontSize: '1rem',
               }}
             >
-              <Activity size={22} />
+              <Activity size={18} />
               Parameters
             </h2>
           </div>
@@ -378,15 +379,15 @@ function App() {
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '0.55rem',
+              gap: '0.5rem',
               marginBottom: '-0.25rem',
             }}
           >
-            <ActivitySquare size={19} />
+            <ActivitySquare size={17} />
             <h3
               style={{
                 margin: 0,
-                fontSize: '1rem',
+                fontSize: '0.92rem',
                 color: 'var(--text-primary, #f8fafc)',
               }}
             >
@@ -741,7 +742,7 @@ function App() {
       <style>{`
         @media (max-width: 1200px) {
           .dashboard-grid {
-            grid-template-columns: minmax(240px, 270px) minmax(0, 1fr) !important;
+            grid-template-columns: minmax(200px, 220px) minmax(0, 1fr) !important;
           }
 
           .dashboard-grid > section:last-child {

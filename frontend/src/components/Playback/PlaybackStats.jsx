@@ -64,96 +64,122 @@ export default function PlaybackStats({ state = {}, duration = 0, totalBeats = 0
     <div
       style={{
         display: 'flex',
-        flexDirection: 'row',
-        alignItems: 'center',
-        flexWrap: 'wrap',
-        gap: '1rem',
-        fontSize: '0.8rem',
+        flexDirection: 'column',
+        gap: '0.4rem',
+        fontSize: '0.78rem',
         color: '#94a3b8',
         userSelect: 'none',
+        width: '100%',
       }}
     >
-      {/* Time display */}
-      <div>
+      {/* Row 1: Time & Sample */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          width: '100%',
+        }}
+      >
         <span style={{ color: '#f8fafc', fontVariantNumeric: 'tabular-nums' }}>
           {formattedTime}
         </span>
+        <span style={{ color: '#334155', userSelect: 'none' }}>|</span>
+        <div>
+          <span>Sample: </span>
+          <span style={{ color: '#f8fafc', fontVariantNumeric: 'tabular-nums' }}>
+            {formattedSample}
+          </span>
+        </div>
       </div>
 
-      <span style={{ color: '#334155', userSelect: 'none' }}>|</span>
-
-      {/* Sample Index */}
-      <div>
-        <span>Sample: </span>
-        <span style={{ color: '#f8fafc', fontVariantNumeric: 'tabular-nums' }}>
-          {formattedSample}
-        </span>
-      </div>
-
-      <span style={{ color: '#334155', userSelect: 'none' }}>|</span>
-
-      {/* Beat Index / Total Beats */}
-      <div>
-        <span>Beat: </span>
-        <span style={{ color: '#f8fafc', fontVariantNumeric: 'tabular-nums' }}>
-          {formattedBeat}
-        </span>
-      </div>
-
-      <span style={{ color: '#334155', userSelect: 'none' }}>|</span>
-
-      {/* Heart Rate */}
-      <div>
-        <span>HR: </span>
-        <span style={{ color: '#f8fafc', fontVariantNumeric: 'tabular-nums' }}>
-          {formattedHR}
-        </span>
-      </div>
-
-      <span style={{ color: '#334155', userSelect: 'none' }}>|</span>
-
-      {/* Conduction Phase & Inline Progress Bar */}
+      {/* Row 2: Beat & Heart Rate */}
       <div
         style={{
-          display: 'inline-flex',
+          display: 'flex',
           alignItems: 'center',
-          gap: '0.5rem',
+          justifyContent: 'space-between',
+          width: '100%',
         }}
       >
-        <span>
-          Phase: <br/>
-          <span style={{ color: '#60a5fa', fontWeight: 600 }}>
-            {formattedPhaseName}
+        <div>
+          <span>Beat: </span>
+          <span style={{ color: '#f8fafc', fontVariantNumeric: 'tabular-nums' }}>
+            {formattedBeat}
           </span>
-        </span>
+        </div>
+        <span style={{ color: '#334155', userSelect: 'none' }}>|</span>
+        <div>
+          <span>HR: </span>
+          <span style={{ color: '#f8fafc', fontVariantNumeric: 'tabular-nums' }}>
+            {formattedHR}
+          </span>
+        </div>
+      </div>
 
-        {/* Small inline progress bar: 60px wide, 4px tall, background: #334155, fill background: #3b82f6 */}
+      {/* Conduction Phase & Progress Bar */}
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '0.2rem',
+          width: '100%',
+          marginTop: '0.15rem',
+        }}
+      >
+        <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>Phase:</span>
+        <span
+          style={{
+            color: '#60a5fa',
+            fontWeight: 600,
+            fontSize: '0.88rem',
+            lineHeight: 1.2,
+          }}
+        >
+          {formattedPhaseName}
+        </span>
         <div
           style={{
-            width: '60px',
-            height: '4px',
-            background: '#334155',
-            borderRadius: '2px',
-            overflow: 'hidden',
-            display: 'inline-block',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            width: '100%',
+            marginTop: '0.15rem',
           }}
-          title={`Phase progress: ${progressPercent}%`}
         >
           <div
             style={{
-              width: `${progressPercent}%`,
-              height: '100%',
-              background: '#3b82f6',
-              borderRadius: '2px',
-              transition: 'width 0.1s linear',
+              flex: 1,
+              height: '5px',
+              background: '#334155',
+              borderRadius: '3px',
+              overflow: 'hidden',
             }}
-          />
+            title={`Phase progress: ${progressPercent}%`}
+          >
+            <div
+              style={{
+                width: `${progressPercent}%`,
+                height: '100%',
+                background: '#3b82f6',
+                borderRadius: '3px',
+                transition: 'width 0.1s linear',
+              }}
+            />
+          </div>
+          <span
+            style={{
+              color: '#f8fafc',
+              fontVariantNumeric: 'tabular-nums',
+              fontSize: '0.78rem',
+              fontWeight: 500,
+              minWidth: '32px',
+              textAlign: 'right',
+            }}
+          >
+            {progressPercent}%
+          </span>
         </div>
-
-        {/* Percentage */}
-        <span style={{ color: '#f8fafc', fontVariantNumeric: 'tabular-nums' }}>
-          {progressPercent}%
-        </span>
       </div>
     </div>
   );
