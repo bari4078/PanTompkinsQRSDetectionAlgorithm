@@ -27,6 +27,7 @@ import PlaybackStats from './components/Playback/PlaybackStats';
 import ECGPlot from './components/ECGPlot/ECGPlot';
 import PlaybackCursor from './components/ECGPlot/PlaybackCursor';
 import EvaluationPanel from './components/Evaluation/EvaluationPanel';
+import DocumentationPanel from './components/Documentation/DocumentationPanel';
 import './index.css';
 
 const DURATION = 10; // seconds
@@ -359,7 +360,10 @@ function App() {
             </button>
             <button
               type="button"
-              onClick={() => setViewMode('evaluation')}
+              onClick={() => {
+                if (playbackState.isPlaying) pause();
+                setViewMode('evaluation');
+              }}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -378,21 +382,31 @@ function App() {
               <Award size={15} />
               Evaluation Benchmark
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (playbackState.isPlaying) pause();
+                setViewMode('docs');
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.45rem',
+                padding: '0.45rem 0.85rem',
+                borderRadius: '6px',
+                border: viewMode === 'docs' ? '1px solid #38bdf8' : 'none',
+                background: viewMode === 'docs' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                color: viewMode === 'docs' ? '#38bdf8' : '#94a3b8',
+                fontWeight: viewMode === 'docs' ? 600 : 500,
+                fontSize: '0.82rem',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <BookOpen size={15} />
+              Documentation
+            </button>
           </div>
-
-          <button
-            type="button"
-            className="stage-btn"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.45rem',
-              padding: '0.55rem 0.9rem',
-            }}
-          >
-            <BookOpen size={17} />
-            Documentation
-          </button>
         </div>
       </header>
 
@@ -1860,6 +1874,7 @@ function App() {
 
           <div style={{ flex: 1, minHeight: 0 }}>
             <Canvas
+              frameloop={viewMode === 'workspace' ? 'always' : 'never'}
               camera={{
                 position: [0, 0, 4.5],
                 fov: 42,
@@ -1888,7 +1903,7 @@ function App() {
 
               <OrbitControls
                 enableZoom={true}
-                autoRotate={!playbackState.isPlaying}
+                autoRotate={viewMode === 'workspace' && !playbackState.isPlaying}
                 autoRotateSpeed={0.55}
                 minDistance={2.9}
                 maxDistance={6}
@@ -1923,6 +1938,19 @@ function App() {
             currentRecordId={selectedRecord}
             availableRecords={records}
             detectorParams={{ windowSizeMs: windowSize, lowcut, highcut }}
+          />
+        </div>
+      )}
+
+      {/* ───────────────────────── In-App Technical Documentation Panel ───────────────────────── */}
+      {viewMode === 'docs' && (
+        <div style={{ width: '100%', margin: '0 auto' }}>
+          <DocumentationPanel
+            onBack={() => setViewMode('workspace')}
+            onOpenEvaluation={() => {
+              if (playbackState.isPlaying) pause();
+              setViewMode('evaluation');
+            }}
           />
         </div>
       )}
