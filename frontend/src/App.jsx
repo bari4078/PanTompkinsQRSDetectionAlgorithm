@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
 import Plot from 'react-plotly.js';
 import {
   Activity,
@@ -7,8 +7,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   BookOpen,
-  Settings,
-  Maximize2,
   Cpu,
   ChevronLeft,
   ChevronRight,
@@ -16,6 +14,8 @@ import {
   ZoomIn,
   ChevronDown,
   ChevronUp,
+  Info,
+  Sliders,
 } from 'lucide-react';
 import { usePlaybackEngine } from './playback/usePlaybackEngine';
 import { Canvas } from '@react-three/fiber';
@@ -26,6 +26,114 @@ import PlaybackStats from './components/Playback/PlaybackStats';
 import './index.css';
 
 const DURATION = 10; // seconds
+
+/**
+ * Educational & Algorithmic metadata for each Pan-Tompkins stage.
+ * Based faithfully on the original 1985 Pan-Tompkins publication.
+ */
+const STAGE_CONFIG = {
+  original: {
+    title: 'Original',
+    subtitle: 'Raw ECG signal',
+    color: '#3b82f6',
+    badgeColor: 'rgba(59, 130, 246, 0.2)',
+    borderColor: '#3b82f6',
+    represents:
+      'The raw lead electrocardiogram voltage recording (e.g., MIT-BIH Lead II / MLII) digitized at the patient acquisition rate.',
+    whyUsed:
+      'Serves as the clinical ground truth and morphological reference signal. Detected QRS complexes are mapped back here for true fiducial localization and beat delineation.',
+    detectionContribution:
+      'Provides true physiological amplitude, baseline voltage, and polarity. Pan-Tompkins aligns candidate events to this signal for final R-peak confirmation and T-wave discrimination.',
+    getSettings: (fs, _winMs) => [
+      { label: 'Sampling Rate (fs)', value: `${fs} Hz` },
+      { label: 'Signal Duration', value: `${DURATION} s (${fs * DURATION} samples)` },
+      { label: 'Processing Delay', value: '0 ms (0 samples)' },
+      { label: 'Signal Range', value: 'Raw Lead II / MLII voltage (mV)' },
+    ],
+  },
+  bandpass: {
+    title: 'Bandpass',
+    subtitle: 'Noise-reduced ECG • approximately 5–15 Hz target',
+    color: '#06b6d4',
+    badgeColor: 'rgba(6, 182, 212, 0.2)',
+    borderColor: '#06b6d4',
+    represents:
+      'The ECG signal filtered through cascaded second-order low-pass (~11 Hz) and high-pass (~5 Hz) digital filters to isolate the 5–15 Hz band.',
+    whyUsed:
+      'Attenuates baseline drift from respiration, high-frequency EMG muscle noise, and 60 Hz power-line interference while maximizing the signal-to-noise ratio in the frequency band of QRS energy.',
+    detectionContribution:
+      'Eliminates false triggers caused by respiratory sway and sharp muscle noise. Pan-Tompkins maintains a dedicated adaptive threshold pair (SPKF, NPKF, THRESHOLD_F1, THRESHOLD_F2) on this signal to verify QRS candidates.',
+    getSettings: (fs, _winMs) => [
+      { label: 'Sampling Rate (fs)', value: `${fs} Hz` },
+      { label: 'Target Passband', value: '5.0 Hz – 15.0 Hz (~3 dB bandwidth)' },
+      { label: 'Filter Delay', value: `~21 samples (~${((21 / fs) * 1000).toFixed(1)} ms group delay)` },
+      { label: 'Bandpass Thresholds', value: 'SPKF / NPKF tracking (F1 primary, F2 search-back)' },
+    ],
+  },
+  derivative: {
+    title: 'Derivative',
+    subtitle: 'QRS slope information',
+    color: '#a855f7',
+    badgeColor: 'rgba(168, 85, 247, 0.2)',
+    borderColor: '#a855f7',
+    represents:
+      'First-order derivative of the bandpass-filtered signal computed via a 5-point central difference operator: y(n) = (1/8T)[2x(n) + x(n-1) - x(n-3) - 2x(n-4)].',
+    whyUsed:
+      'The QRS complex exhibits the steepest slopes (highest dV/dt) of the cardiac cycle. Differentiation heavily accentuates steep QRS transitions while suppressing flatter P and T waves.',
+    detectionContribution:
+      'Supplies high-fidelity slope information. It yields prominent positive and negative deflections for rapid Q-to-R and R-to-S deflections, acting as an effective high-slope detector.',
+    getSettings: (fs, _winMs) => [
+      { label: 'Sampling Rate (fs)', value: `${fs} Hz` },
+      { label: 'Difference Equation', value: '5-Point Central Derivative: (1/8T)[2x(n)+x(n-1)-x(n-3)-2x(n-4)]' },
+      { label: 'Operator Delay', value: `2 samples (~${((2 / fs) * 1000).toFixed(1)} ms; cumulative ~23 samples)` },
+      { label: 'Extracted Feature', value: 'Steep dV/dt rising & falling edges' },
+    ],
+  },
+  squared: {
+    title: 'Squared',
+    subtitle: 'Nonlinear slope enhancement',
+    color: '#ec4899',
+    badgeColor: 'rgba(236, 72, 153, 0.2)',
+    borderColor: '#ec4899',
+    represents:
+      'Pointwise nonlinear squaring transformation: y(n) = [x(n)]² applied sample-by-sample to the derivative waveform.',
+    whyUsed:
+      'Enforces strict non-negativity across all deflections and nonlinearly magnifies large slope peaks relative to smaller residual background noise and baseline fluctuations.',
+    detectionContribution:
+      'Prevents negative deflections (such as deep S-waves or inverted QS complexes) from canceling and heavily widens the amplitude separation between QRS slope peaks and residual T-waves.',
+    getSettings: (fs, _winMs) => [
+      { label: 'Sampling Rate (fs)', value: `${fs} Hz` },
+      { label: 'Transformation', value: 'Pointwise Nonlinear Squaring: y(n) = x(n)²' },
+      { label: 'Additional Delay', value: '0 ms (0 samples) • Instantaneous operation' },
+      { label: 'Dynamic Effect', value: 'Nonlinear high-slope emphasis' },
+    ],
+  },
+  integrated: {
+    title: 'Integrated',
+    subtitle: 'QRS width + slope information',
+    color: '#10b981',
+    badgeColor: 'rgba(16, 185, 129, 0.2)',
+    borderColor: '#10b981',
+    represents:
+      'Moving-window integrator averaging the squared derivative over an N-sample sliding window: y(n) = (1/N) * sum_{k=0}^{N-1} x(n - (N - 1) + k), where window width N spans approximately 150 ms.',
+    whyUsed:
+      'A differentiated QRS complex contains multiple sharp slope spikes. Moving integration blends these separate peaks into a single smooth, consolidated pulse containing both slope and duration information.',
+    detectionContribution:
+      'Produces the primary decision waveform used by the dual-threshold state machine (SPKI, NPKI, THRESHOLD_I1, THRESHOLD_I2) to identify QRS candidate intervals.',
+    getSettings: (fs, winMs) => [
+      { label: 'Sampling Rate (fs)', value: `${fs} Hz` },
+      { label: 'Window Duration', value: `${winMs} ms (Pan-Tompkins standard ~150 ms)` },
+      { label: 'Window Width (N)', value: `${Math.round((winMs / 1000) * fs)} samples` },
+      {
+        label: 'Integration Delay',
+        value: `N/2 = ~${Math.round(((winMs / 1000) * fs) / 2)} samples (~${(winMs / 2).toFixed(1)} ms; total ~${(
+          ((21 + 2 + Math.round(((winMs / 1000) * fs) / 2)) / fs) *
+          1000
+        ).toFixed(1)} ms)`,
+      },
+    ],
+  },
+};
 
 function App() {
   const [records, setRecords] = useState([]);
@@ -43,8 +151,8 @@ function App() {
   const [xRange, setXRange] = useState([0, DURATION]);
   const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
 
-  // Extract R-peaks and fs for the playback engine
-  const rPeaks = data?.stages?.peaks_original || [];
+  // Extract R-peaks and fs memoized to prevent unnecessary re-instantiations
+  const rPeaks = useMemo(() => data?.stages?.peaks_original || [], [data?.stages?.peaks_original]);
   const fs = data?.fs || 360;
 
   // Centralized playback engine — single source of truth for timing + cardiac phase
@@ -57,17 +165,17 @@ function App() {
   // Fetch available records on mount
   useEffect(() => {
     fetch('http://localhost:8000/api/records')
-      .then(res => res.json())
-      .then(result => {
+      .then((res) => res.json())
+      .then((result) => {
         if (result.records && result.records.length > 0) {
           setRecords(result.records);
           setSelectedRecord(result.records[0]);
         }
       })
-      .catch(err => console.error('Failed to fetch records:', err));
+      .catch((err) => console.error('Failed to fetch records:', err));
   }, []);
 
-  const processSignal = async () => {
+  const processSignal = useCallback(async () => {
     setLoading(true);
     setError(null);
     playbackControls.stop();
@@ -97,7 +205,7 @@ function App() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedRecord, windowSize, lowcut, highcut, playbackControls]);
 
   useEffect(() => {
     if (records.length > 0) {
@@ -105,67 +213,83 @@ function App() {
     }
   }, [records, selectedRecord]);
 
-  const focusBeat = (idx) => {
-    const beats = data?.delineation || [];
-    const b = beats[idx];
-    if (!b) return;
-    const center = b.r_time !== null ? b.r_time : (b.dominant_deflection_index / fs);
-    const halfWin = 0.35; // 350ms window
-    setXRange([Math.max(0, center - halfWin), Math.min(DURATION, center + halfWin)]);
-  };
+  const focusBeat = useCallback(
+    (idx) => {
+      const beats = data?.delineation || [];
+      const b = beats[idx];
+      if (!b) return;
+      const center = b.r_time !== null && b.r_time !== undefined
+        ? b.r_time
+        : (b.dominant_deflection_index ? b.dominant_deflection_index / fs : b.pt_qrs_index / fs);
+      const halfWin = 0.35; // 350ms window
+      setXRange([Math.max(0, center - halfWin), Math.min(DURATION, center + halfWin)]);
+    },
+    [data, fs]
+  );
 
-  const resetZoom = () => {
+  const resetZoom = useCallback(() => {
     setXRange([0, DURATION]);
-  };
+  }, []);
 
-  const handlePrevBeat = () => {
+  const handlePrevBeat = useCallback(() => {
     if (!data?.delineation?.length) return;
     const prevIdx = Math.max(0, selectedBeatIndex - 1);
     setSelectedBeatIndex(prevIdx);
     focusBeat(prevIdx);
-  };
+  }, [data, selectedBeatIndex, focusBeat]);
 
-  const handleNextBeat = () => {
+  const handleNextBeat = useCallback(() => {
     if (!data?.delineation?.length) return;
     const nextIdx = Math.min(data.delineation.length - 1, selectedBeatIndex + 1);
     setSelectedBeatIndex(nextIdx);
     focusBeat(nextIdx);
-  };
+  }, [data, selectedBeatIndex, focusBeat]);
 
-  const handlePlotClick = (evt) => {
-    if (!evt.points || evt.points.length === 0 || !data?.delineation?.length) return;
-    const clickX = evt.points[0].x;
-    let closestIdx = 0;
-    let minDiff = Infinity;
-    data.delineation.forEach((b, idx) => {
-      const refTime = b.r_time !== null ? b.r_time : (b.dominant_deflection_index / fs);
-      const diff = Math.abs(refTime - clickX);
-      if (diff < minDiff) {
-        minDiff = diff;
-        closestIdx = idx;
+  const handlePlotClick = useCallback(
+    (evt) => {
+      if (!evt.points || evt.points.length === 0 || !data?.delineation?.length) return;
+      const clickX = evt.points[0].x;
+      let closestIdx = 0;
+      let minDiff = Infinity;
+      data.delineation.forEach((b, idx) => {
+        const refTime = b.r_time !== null && b.r_time !== undefined
+          ? b.r_time
+          : (b.dominant_deflection_index ? b.dominant_deflection_index / fs : b.pt_qrs_index / fs);
+        const diff = Math.abs(refTime - clickX);
+        if (diff < minDiff) {
+          minDiff = diff;
+          closestIdx = idx;
+        }
+      });
+      if (minDiff < 0.6) {
+        setSelectedBeatIndex(closestIdx);
       }
-    });
-    if (minDiff < 0.6) {
-      setSelectedBeatIndex(closestIdx);
-    }
-  };
+    },
+    [data, fs]
+  );
 
-  const handleRelayout = (event) => {
+  const handleRelayout = useCallback((event) => {
     if (event['xaxis.range[0]'] !== undefined && event['xaxis.range[1]'] !== undefined) {
-      setXRange([event['xaxis.range[0]'], event['xaxis.range[1]']]);
+      const newMin = Number(event['xaxis.range[0]']);
+      const newMax = Number(event['xaxis.range[1]']);
+      setXRange((prev) => {
+        if (Math.abs(prev[0] - newMin) < 0.005 && Math.abs(prev[1] - newMax) < 0.005) {
+          return prev;
+        }
+        return [newMin, newMax];
+      });
     } else if (event['xaxis.autorange']) {
       setXRange([0, DURATION]);
     }
-  };
+  }, []);
 
   const renderPlot = () => {
-    if (!data) return null;
+    if (!data || !data.stages) return null;
 
     const signalData = data.stages[activeStage];
-    const timeAxis = Array.from(
-      { length: signalData.length },
-      (_, i) => i / fs
-    );
+    if (!signalData || !Array.isArray(signalData)) return null;
+
+    const timeAxis = Array.from({ length: signalData.length }, (_, i) => i / fs);
 
     const plotData = [
       {
@@ -174,7 +298,7 @@ function App() {
         type: 'scatter',
         mode: 'lines',
         name: `${activeStage.charAt(0).toUpperCase() + activeStage.slice(1)} Signal`,
-        line: { color: '#3b82f6', width: 2 },
+        line: { color: STAGE_CONFIG[activeStage]?.color || '#3b82f6', width: 2 },
         hoverinfo: 'x+y',
       },
     ];
@@ -189,7 +313,7 @@ function App() {
       const searchbackSet = new Set(data.stages.searchback || []);
 
       // 1. Shaded QRS region and boundary lines for the selected beat
-      if (currentBeat) {
+      if (currentBeat && typeof currentBeat.qrs_onset_time === 'number' && typeof currentBeat.qrs_offset_time === 'number') {
         // Subtle shaded QRS region from onset to offset
         shapes.push({
           type: 'rect',
@@ -229,17 +353,19 @@ function App() {
         });
 
         // Horizontal local isoelectric baseline
-        shapes.push({
-          type: 'line',
-          xref: 'x',
-          yref: 'y',
-          x0: Math.max(0, currentBeat.qrs_onset_time - 0.08),
-          x1: Math.min(DURATION, currentBeat.qrs_offset_time + 0.08),
-          y0: currentBeat.isoelectric_baseline,
-          y1: currentBeat.isoelectric_baseline,
-          line: { color: 'rgba(148, 163, 184, 0.35)', width: 1, dash: 'dot' },
-          layer: 'below',
-        });
+        if (typeof currentBeat.isoelectric_baseline === 'number') {
+          shapes.push({
+            type: 'line',
+            xref: 'x',
+            yref: 'y',
+            x0: Math.max(0, currentBeat.qrs_onset_time - 0.08),
+            x1: Math.min(DURATION, currentBeat.qrs_offset_time + 0.08),
+            y0: currentBeat.isoelectric_baseline,
+            y1: currentBeat.isoelectric_baseline,
+            line: { color: 'rgba(148, 163, 184, 0.35)', width: 1, dash: 'dot' },
+            layer: 'below',
+          });
+        }
 
         // Small non-overlapping annotation for Onset
         annotations.push({
@@ -270,7 +396,7 @@ function App() {
         });
 
         // Q Point marker
-        if (currentBeat.q_index !== null) {
+        if (currentBeat.q_index != null && typeof currentBeat.q_time === 'number') {
           plotData.push({
             x: [currentBeat.q_time],
             y: [signalData[currentBeat.q_index]],
@@ -290,7 +416,7 @@ function App() {
         }
 
         // R Peak marker (or QS nadir if inverted)
-        if (currentBeat.r_index !== null) {
+        if (currentBeat.r_index != null && typeof currentBeat.r_time === 'number') {
           plotData.push({
             x: [currentBeat.r_time],
             y: [signalData[currentBeat.r_index]],
@@ -307,7 +433,7 @@ function App() {
               line: { color: '#ffffff', width: 2 },
             },
           });
-        } else if (currentBeat.dominant_deflection_index !== null) {
+        } else if (currentBeat.dominant_deflection_index != null) {
           plotData.push({
             x: [currentBeat.dominant_deflection_index / fs],
             y: [signalData[currentBeat.dominant_deflection_index]],
@@ -327,7 +453,7 @@ function App() {
         }
 
         // S Point marker
-        if (currentBeat.s_index !== null) {
+        if (currentBeat.s_index != null && typeof currentBeat.s_time === 'number') {
           plotData.push({
             x: [currentBeat.s_time],
             y: [signalData[currentBeat.s_index]],
@@ -347,34 +473,38 @@ function App() {
         }
 
         // Onset marker
-        plotData.push({
-          x: [currentBeat.qrs_onset_time],
-          y: [signalData[currentBeat.qrs_onset_index]],
-          type: 'scatter',
-          mode: 'markers',
-          name: 'QRS Onset Marker',
-          marker: {
-            color: '#10b981',
-            size: 7,
-            symbol: 'circle',
-          },
-          showlegend: false,
-        });
+        if (currentBeat.qrs_onset_index != null) {
+          plotData.push({
+            x: [currentBeat.qrs_onset_time],
+            y: [signalData[currentBeat.qrs_onset_index]],
+            type: 'scatter',
+            mode: 'markers',
+            name: 'QRS Onset Marker',
+            marker: {
+              color: '#10b981',
+              size: 7,
+              symbol: 'circle',
+            },
+            showlegend: false,
+          });
+        }
 
         // Offset marker
-        plotData.push({
-          x: [currentBeat.qrs_offset_time],
-          y: [signalData[currentBeat.qrs_offset_index]],
-          type: 'scatter',
-          mode: 'markers',
-          name: 'QRS Offset Marker',
-          marker: {
-            color: '#06b6d4',
-            size: 7,
-            symbol: 'circle',
-          },
-          showlegend: false,
-        });
+        if (currentBeat.qrs_offset_index != null) {
+          plotData.push({
+            x: [currentBeat.qrs_offset_time],
+            y: [signalData[currentBeat.qrs_offset_index]],
+            type: 'scatter',
+            mode: 'markers',
+            name: 'QRS Offset Marker',
+            marker: {
+              color: '#06b6d4',
+              size: 7,
+              symbol: 'circle',
+            },
+            showlegend: false,
+          });
+        }
       }
 
       // 2. Subtle markers for all other beats across the 10-second sweep
@@ -419,6 +549,37 @@ function App() {
         }
       }
     } else if (activeStage === 'integrated') {
+      // Visual representation of moving-window width on the integrated stage
+      const winSec = windowSize / 1000;
+      const winSamples = Math.round(winSec * fs);
+      const winStart = 0.35;
+      const winEnd = winStart + winSec;
+
+      shapes.push({
+        type: 'rect',
+        xref: 'x',
+        yref: 'paper',
+        x0: winStart,
+        x1: winEnd,
+        y0: 0.82,
+        y1: 0.96,
+        fillcolor: 'rgba(16, 185, 129, 0.22)',
+        line: { color: '#10b981', width: 1.5, dash: 'solid' },
+      });
+
+      annotations.push({
+        x: (winStart + winEnd) / 2,
+        y: 0.89,
+        yref: 'paper',
+        text: `<b>← Moving Window: ${windowSize} ms (${winSamples} samples) →</b>`,
+        showarrow: false,
+        font: { color: '#10b981', size: 10, family: 'Inter, sans-serif' },
+        bgcolor: 'rgba(15, 23, 42, 0.85)',
+        bordercolor: '#10b981',
+        borderwidth: 1,
+        borderpad: 3,
+      });
+
       if (data.stages.threshold_i1) {
         plotData.push({
           x: timeAxis,
@@ -445,7 +606,7 @@ function App() {
           y: data.stages.peaks_integrated.map((p) => signalData[p]),
           type: 'scatter',
           mode: 'markers',
-          name: 'Integrated QRS Peaks',
+          name: 'Integrated Energy Peaks',
           marker: {
             color: '#10b981',
             size: 8,
@@ -493,7 +654,7 @@ function App() {
     const [xMin, xMax] = xRange;
     const currentT = playbackState.currentTime;
     const inView = currentT >= xMin && currentT <= xMax;
-    const pct = inView && (xMax > xMin) ? (currentT - xMin) / (xMax - xMin) : null;
+    const pct = inView && xMax > xMin ? (currentT - xMin) / (xMax - xMin) : null;
 
     return (
       <div
@@ -508,7 +669,8 @@ function App() {
           data={plotData}
           layout={{
             autosize: true,
-            margin: { l: 58, r: 18, t: 14, b: 52 },
+            uirevision: selectedRecord,
+            margin: { l: 58, r: 18, t: 18, b: 52 },
             paper_bgcolor: 'transparent',
             plot_bgcolor: 'transparent',
             font: { color: '#94a3b8' },
@@ -520,7 +682,7 @@ function App() {
               fixedrange: false,
             },
             yaxis: {
-              title: { text: 'Amplitude (mV)', standoff: 8 },
+              title: { text: 'Amplitude (mV / arbitrary units)', standoff: 8 },
               gridcolor: '#334155',
               zerolinecolor: '#334155',
               fixedrange: false,
@@ -553,7 +715,7 @@ function App() {
           <div
             style={{
               position: 'absolute',
-              top: 14,
+              top: 18,
               bottom: 52,
               left: `calc(58px + (100% - 76px) * ${pct})`,
               width: 2,
@@ -577,6 +739,9 @@ function App() {
     boxSizing: 'border-box',
   };
 
+  const currentStageInfo = STAGE_CONFIG[activeStage] || STAGE_CONFIG.original;
+  const currentSettings = currentStageInfo.getSettings(fs, windowSize);
+
   return (
     <div className="app-container" style={{ minHeight: '100vh' }}>
       {/* ───────────────────────── Header ───────────────────────── */}
@@ -592,18 +757,10 @@ function App() {
       >
         <div>
           <h1 style={{ marginBottom: '0.2rem' }}>Pan-Tompkins Algorithm</h1>
-          <p style={{ margin: 0 }}>
-            Advanced QRS Detection &amp; Cardiac Conduction Visualization
-          </p>
+          <p style={{ margin: 0 }}>Advanced QRS Detection &amp; Cardiac Conduction Visualization</p>
         </div>
 
-        <div
-          style={{
-            display: 'flex',
-            gap: '0.65rem',
-            flexShrink: 0,
-          }}
-        >
+        <div style={{ display: 'flex', gap: '0.65rem', flexShrink: 0 }}>
           <button
             type="button"
             className="stage-btn"
@@ -617,39 +774,20 @@ function App() {
             <BookOpen size={17} />
             Documentation
           </button>
-          {/* <button
-            type="button"
-            className="stage-btn"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.45rem',
-              padding: '0.65rem 0.9rem',
-            }}
-          >
-            <Settings size={17} />
-            Settings
-          </button> */}
         </div>
       </header>
 
-      {/* Desktop structure:
-          1) fixed-ish sidebar
-          2) flexible analytics column
-          3) large heart column
-          The heart occupies the whole right side so it can stay visually dominant.
-      */}
+      {/* ───────────────────────── Desktop 3-Column Grid ───────────────────────── */}
       <div
         className="dashboard-grid"
         style={{
           display: 'grid',
-          gridTemplateColumns:
-            'minmax(200px, 220px) minmax(520px, 1fr) minmax(380px, 430px)',
+          gridTemplateColumns: 'minmax(200px, 220px) minmax(520px, 1fr) minmax(380px, 430px)',
           gap: '1.15rem',
           alignItems: 'stretch',
         }}
       >
-        {/* ───────────────────────── Left controls ───────────────────────── */}
+        {/* ───────────────────────── Left Controls ───────────────────────── */}
         <aside
           className="card"
           style={{
@@ -721,11 +859,26 @@ function App() {
             />
           </div>
 
+          <div className="form-group">
+            <label>
+              Integration Window <span>{windowSize} ms</span>
+            </label>
+            <input
+              type="range"
+              className="range-slider"
+              min="80"
+              max="200"
+              step="10"
+              value={windowSize}
+              onChange={(e) => setWindowSize(Number(e.target.value))}
+            />
+          </div>
+
           <button
             className="btn"
             onClick={processSignal}
             disabled={loading}
-            style={{ width: '100%' }}
+            style={{ width: '100%', marginTop: '0.2rem' }}
           >
             {loading ? 'Processing...' : 'Apply & Process'}
           </button>
@@ -751,7 +904,7 @@ function App() {
             }}
           />
 
-          {/* Playback moved into the sidebar to free the main area for the ECG */}
+          {/* Playback Controls */}
           <div
             style={{
               display: 'flex',
@@ -795,7 +948,7 @@ function App() {
           </div>
         </aside>
 
-        {/* ───────────────────────── Center analytics ───────────────────────── */}
+        {/* ───────────────────────── Center Analytics Column ───────────────────────── */}
         <main
           style={{
             minWidth: 0,
@@ -804,7 +957,7 @@ function App() {
             gap: '1.15rem',
           }}
         >
-          {/* 4 compact metric cards in ONE row */}
+          {/* 4 Compact Metric Cards */}
           <div
             className="metrics-grid"
             style={{
@@ -834,7 +987,7 @@ function App() {
                 }}
               >
                 <Heart size={25} color="#ef4444" />
-                {data ? `${data.analysis.hr_bpm} BPM` : '--'}
+                {data?.analysis?.hr_bpm ? `${data.analysis.hr_bpm} BPM` : '--'}
               </div>
             </div>
 
@@ -858,7 +1011,7 @@ function App() {
                 }}
               >
                 <Activity size={25} color="#60a5fa" />
-                {data ? `${data.analysis.sdnn_ms} ms` : '--'}
+                {data?.analysis?.sdnn_ms ? `${data.analysis.sdnn_ms} ms` : '--'}
               </div>
             </div>
 
@@ -873,12 +1026,11 @@ function App() {
             >
               <div className="metric-label">RHYTHM STATUS</div>
               <div className="abnormalities" style={{ marginTop: '0.55rem' }}>
-                {data ? (
+                {data?.analysis?.abnormalities ? (
                   data.analysis.abnormalities.map((abn, i) => (
                     <div
                       key={i}
-                      className={`alert ${abn.includes('Normal') ? 'success' : 'danger'
-                        }`}
+                      className={`alert ${abn.includes('Normal') ? 'success' : 'danger'}`}
                       style={{
                         margin: 0,
                         fontSize: '0.82rem',
@@ -894,9 +1046,7 @@ function App() {
                     </div>
                   ))
                 ) : (
-                  <div style={{ color: 'var(--text-muted)' }}>
-                    Waiting for data...
-                  </div>
+                  <div style={{ color: 'var(--text-muted)' }}>Waiting for data...</div>
                 )}
               </div>
             </div>
@@ -934,7 +1084,7 @@ function App() {
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span>QRS Beats:</span>
                   <strong style={{ color: '#10b981' }}>
-                    {data?.stages?.detected_peaks?.length || '--'}
+                    {data?.stages?.detected_peaks?.length ?? '--'}
                   </strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -953,28 +1103,28 @@ function App() {
             </div>
           </div>
 
-          {/* ECG stage viewer gets center-column workspace */}
+          {/* ECG Stage Workspace */}
           <section
             className="card"
             style={{
               ...cardStyle,
               minHeight: 0,
-              padding: '0.9rem',
+              padding: '1rem',
               display: 'flex',
               flexDirection: 'column',
-              gap: '0.7rem',
+              gap: '0.85rem',
               overflowY: 'auto',
             }}
           >
-            {/* Header: Title + Algorithm Stage Tabs */}
+            {/* Header: Title */}
             <div
               style={{
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
                 gap: '1rem',
-                marginBottom: '0.2rem',
-                padding: '0 0.25rem',
+                marginBottom: '0.1rem',
+                padding: '0 0.2rem',
                 flexWrap: 'wrap',
               }}
             >
@@ -987,37 +1137,85 @@ function App() {
                   fontSize: '1.15rem',
                 }}
               >
-                <ActivitySquare size={22} />
+                <ActivitySquare size={22} color="#3b82f6" />
                 Algorithm Stages
               </h2>
 
-              <div
-                className="stage-selector"
-                style={{
-                  marginBottom: 0,
-                  display: 'flex',
-                  gap: '0.25rem',
-                  flexWrap: 'wrap',
-                  justifyContent: 'flex-end',
-                }}
-              >
-                {[
-                  'original',
-                  'bandpass',
-                  'derivative',
-                  'squared',
-                  'integrated',
-                ].map((stage) => (
+              <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
+                Click tabs below to inspect intermediate transformation stages
+              </span>
+            </div>
+
+            {/* Stage Selector Grid with Compact Explanatory Subtitles */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
+                gap: '0.45rem',
+                width: '100%',
+              }}
+            >
+              {Object.keys(STAGE_CONFIG).map((stage) => {
+                const config = STAGE_CONFIG[stage];
+                const isActive = activeStage === stage;
+                return (
                   <button
                     key={stage}
-                    className={`stage-btn ${activeStage === stage ? 'active' : ''
-                      }`}
+                    type="button"
                     onClick={() => setActiveStage(stage)}
+                    style={{
+                      background: isActive ? 'rgba(30, 41, 59, 0.95)' : 'rgba(15, 23, 42, 0.65)',
+                      border: isActive ? `1.5px solid ${config.color}` : '1px solid #334155',
+                      borderRadius: '10px',
+                      padding: '0.5rem 0.65rem',
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                      transition: 'all 0.18s ease',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.2rem',
+                      boxShadow: isActive ? `0 0 12px ${config.color}33` : 'none',
+                    }}
                   >
-                    {stage.charAt(0).toUpperCase() + stage.slice(1)}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span
+                        style={{
+                          fontSize: '0.88rem',
+                          fontWeight: 700,
+                          color: isActive ? config.color : '#f8fafc',
+                        }}
+                      >
+                        {config.title}
+                      </span>
+                      {isActive && (
+                        <span
+                          style={{
+                            width: 7,
+                            height: 7,
+                            borderRadius: '50%',
+                            background: config.color,
+                            boxShadow: `0 0 6px ${config.color}`,
+                          }}
+                        />
+                      )}
+                    </div>
+                    <span
+                      style={{
+                        fontSize: '0.69rem',
+                        color: isActive ? '#cbd5e1' : '#94a3b8',
+                        lineHeight: 1.25,
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden',
+                      }}
+                      title={config.subtitle}
+                    >
+                      {config.subtitle}
+                    </span>
                   </button>
-                ))}
-              </div>
+                );
+              })}
             </div>
 
             {/* ECG Plot Container */}
@@ -1025,8 +1223,8 @@ function App() {
               className="plot-container"
               style={{
                 position: 'relative',
-                minHeight: 340,
-                height: 380,
+                minHeight: 330,
+                height: 360,
                 flexShrink: 0,
                 overflow: 'hidden',
               }}
@@ -1040,11 +1238,14 @@ function App() {
               {renderPlot()}
             </div>
 
-            {/* Selected-Beat Information Panel & Pan-Tompkins Evidence */}
-            {data?.delineation?.length > 0 && (() => {
+            {/* Selected-Beat Information Panel & Pan-Tompkins Evidence (When Original is Active) */}
+            {activeStage === 'original' && data?.delineation?.length > 0 && (() => {
               const selectedBeat = data.delineation[selectedBeatIndex] || data.delineation[0];
               const totalBeats = data.delineation.length;
-              const isSearchback = selectedBeat.detection_evidence?.method === 'searchback';
+              const isSearchback = selectedBeat?.detection_evidence?.method === 'searchback';
+              const domType = selectedBeat?.dominant_deflection_type
+                ? selectedBeat.dominant_deflection_type.toUpperCase()
+                : 'NORMAL';
 
               return (
                 <div
@@ -1069,8 +1270,8 @@ function App() {
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: '1rem', fontWeight: 700, color: '#f8fafc' }}>
-                        Beat #{selectedBeat.beat_index + 1}{' '}
+                      <span style={{ fontSize: '0.98rem', fontWeight: 700, color: '#f8fafc' }}>
+                        Beat #{(selectedBeat?.beat_index ?? 0) + 1}{' '}
                         <span style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: 400 }}>
                           of {totalBeats}
                         </span>
@@ -1105,7 +1306,7 @@ function App() {
                           border: '1px solid rgba(59, 130, 246, 0.4)',
                         }}
                       >
-                        {selectedBeat.dominant_deflection_type.toUpperCase()} MORPHOLOGY
+                        {domType} MORPHOLOGY
                       </span>
                     </div>
 
@@ -1178,7 +1379,7 @@ function App() {
                     </div>
                   </div>
 
-                  {/* Compact Selected-Beat Measurements Grid */}
+                  {/* Selected-Beat Measurements Grid */}
                   <div
                     style={{
                       display: 'grid',
@@ -1191,54 +1392,54 @@ function App() {
                     }}
                   >
                     <div>
-                      <div style={{ fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      <div style={{ fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase' }}>
                         Q Point
                       </div>
                       <div style={{ fontSize: '0.92rem', fontWeight: 600, color: '#f59e0b', marginTop: '0.2rem' }}>
-                        {selectedBeat.q_time !== null ? `${selectedBeat.q_time.toFixed(3)} s` : 'None'}
+                        {typeof selectedBeat?.q_time === 'number' ? `${selectedBeat.q_time.toFixed(3)} s` : 'None'}
                       </div>
                     </div>
 
                     <div>
-                      <div style={{ fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      <div style={{ fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase' }}>
                         R Peak
                       </div>
                       <div style={{ fontSize: '0.92rem', fontWeight: 600, color: '#ef4444', marginTop: '0.2rem' }}>
-                        {selectedBeat.r_time !== null ? `${selectedBeat.r_time.toFixed(3)} s` : 'None (QS)'}
+                        {typeof selectedBeat?.r_time === 'number' ? `${selectedBeat.r_time.toFixed(3)} s` : 'None (QS)'}
                       </div>
                     </div>
 
                     <div>
-                      <div style={{ fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      <div style={{ fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase' }}>
                         S Point
                       </div>
                       <div style={{ fontSize: '0.92rem', fontWeight: 600, color: '#38bdf8', marginTop: '0.2rem' }}>
-                        {selectedBeat.s_time !== null ? `${selectedBeat.s_time.toFixed(3)} s` : 'None'}
+                        {typeof selectedBeat?.s_time === 'number' ? `${selectedBeat.s_time.toFixed(3)} s` : 'None'}
                       </div>
                     </div>
 
                     <div>
-                      <div style={{ fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      <div style={{ fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase' }}>
                         QRS Duration
                       </div>
                       <div style={{ fontSize: '0.92rem', fontWeight: 600, color: '#10b981', marginTop: '0.2rem' }}>
-                        {selectedBeat.qrs_duration_ms.toFixed(1)} ms
+                        {typeof selectedBeat?.qrs_duration_ms === 'number' ? `${selectedBeat.qrs_duration_ms.toFixed(1)} ms` : '--'}
                       </div>
                     </div>
 
                     <div>
-                      <div style={{ fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      <div style={{ fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase' }}>
                         RR Interval
                       </div>
                       <div style={{ fontSize: '0.92rem', fontWeight: 600, color: '#a78bfa', marginTop: '0.2rem' }}>
-                        {selectedBeat.detection_evidence?.rr_interval_ms
+                        {selectedBeat?.detection_evidence?.rr_interval_ms
                           ? `${selectedBeat.detection_evidence.rr_interval_ms} ms`
-                          : (selectedBeat.beat_index === 0 ? 'Initial Beat' : '--')}
+                          : (selectedBeat?.beat_index === 0 ? 'Initial Beat' : '--')}
                       </div>
                     </div>
 
                     <div>
-                      <div style={{ fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      <div style={{ fontSize: '0.68rem', color: '#94a3b8', textTransform: 'uppercase' }}>
                         Detection
                       </div>
                       <div style={{ fontSize: '0.92rem', fontWeight: 600, color: '#f8fafc', marginTop: '0.2rem' }}>
@@ -1297,16 +1498,16 @@ function App() {
                           <strong style={{ color: '#e2e8f0', display: 'block', marginBottom: '0.2rem' }}>
                             Integration Threshold
                           </strong>
-                          <div>TH_I1: <span style={{ color: '#f59e0b' }}>{selectedBeat.detection_evidence?.threshold_i1 ?? '--'}</span></div>
-                          <div>TH_I2: <span style={{ color: '#fbbf24' }}>{selectedBeat.detection_evidence?.threshold_i2 ?? '--'}</span></div>
+                          <div>TH_I1: <span style={{ color: '#f59e0b' }}>{selectedBeat?.detection_evidence?.threshold_i1 ?? '--'}</span></div>
+                          <div>TH_I2: <span style={{ color: '#fbbf24' }}>{selectedBeat?.detection_evidence?.threshold_i2 ?? '--'}</span></div>
                         </div>
 
                         <div>
                           <strong style={{ color: '#e2e8f0', display: 'block', marginBottom: '0.2rem' }}>
                             Filtered Threshold
                           </strong>
-                          <div>TH_F1: <span style={{ color: '#f59e0b' }}>{selectedBeat.detection_evidence?.threshold_f1 ?? '--'}</span></div>
-                          <div>TH_F2: <span style={{ color: '#fbbf24' }}>{selectedBeat.detection_evidence?.threshold_f2 ?? '--'}</span></div>
+                          <div>TH_F1: <span style={{ color: '#f59e0b' }}>{selectedBeat?.detection_evidence?.threshold_f1 ?? '--'}</span></div>
+                          <div>TH_F2: <span style={{ color: '#fbbf24' }}>{selectedBeat?.detection_evidence?.threshold_f2 ?? '--'}</span></div>
                         </div>
 
                         <div>
@@ -1314,7 +1515,7 @@ function App() {
                             RR Condition
                           </strong>
                           <div>
-                            {selectedBeat.detection_evidence?.rr_interval_ms
+                            {selectedBeat?.detection_evidence?.rr_interval_ms
                               ? `${selectedBeat.detection_evidence.rr_interval_ms} ms (within 92%-116% RR2)`
                               : 'Initial adaptation period'}
                           </div>
@@ -1382,10 +1583,279 @@ function App() {
                 </div>
               );
             })()}
+
+            {/* ───────────────────────── Selected Stage Explanation Panel ───────────────────────── */}
+            <div
+              style={{
+                background: 'rgba(15, 23, 42, 0.85)',
+                border: `1px solid ${currentStageInfo.color}55`,
+                borderRadius: '12px',
+                padding: '1rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.8rem',
+              }}
+            >
+              {/* Stage Header */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  borderBottom: '1px solid rgba(51, 65, 85, 0.5)',
+                  paddingBottom: '0.55rem',
+                  flexWrap: 'wrap',
+                  gap: '0.5rem',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                  <span
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: '50%',
+                      background: currentStageInfo.color,
+                      boxShadow: `0 0 8px ${currentStageInfo.color}`,
+                    }}
+                  />
+                  <span style={{ fontSize: '1rem', fontWeight: 700, color: '#f8fafc' }}>
+                    {currentStageInfo.title} Stage Analysis
+                  </span>
+                  <span
+                    style={{
+                      fontSize: '0.74rem',
+                      fontWeight: 500,
+                      padding: '0.2rem 0.55rem',
+                      borderRadius: '6px',
+                      background: currentStageInfo.badgeColor,
+                      color: currentStageInfo.color,
+                      border: `1px solid ${currentStageInfo.color}44`,
+                    }}
+                  >
+                    {currentStageInfo.subtitle}
+                  </span>
+                </div>
+
+                <span style={{ fontSize: '0.74rem', color: '#94a3b8' }}>
+                  Pan-Tompkins (1985) Pipeline Specification
+                </span>
+              </div>
+
+              {/* 3 Core Questions: Representation, Purpose, Detection Contribution */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                  gap: '0.85rem',
+                  fontSize: '0.8rem',
+                  lineHeight: 1.45,
+                }}
+              >
+                <div
+                  style={{
+                    background: 'rgba(30, 41, 59, 0.5)',
+                    padding: '0.7rem 0.8rem',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(51, 65, 85, 0.4)',
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      color: currentStageInfo.color,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                      marginBottom: '0.35rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                    }}
+                  >
+                    <Info size={13} />
+                    1. What This Signal Represents
+                  </div>
+                  <div style={{ color: '#e2e8f0' }}>{currentStageInfo.represents}</div>
+                </div>
+
+                <div
+                  style={{
+                    background: 'rgba(30, 41, 59, 0.5)',
+                    padding: '0.7rem 0.8rem',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(51, 65, 85, 0.4)',
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      color: currentStageInfo.color,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                      marginBottom: '0.35rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                    }}
+                  >
+                    <Cpu size={13} />
+                    2. Why Pan-Tompkins Uses It
+                  </div>
+                  <div style={{ color: '#e2e8f0' }}>{currentStageInfo.whyUsed}</div>
+                </div>
+
+                <div
+                  style={{
+                    background: 'rgba(30, 41, 59, 0.5)',
+                    padding: '0.7rem 0.8rem',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(51, 65, 85, 0.4)',
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      color: currentStageInfo.color,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                      marginBottom: '0.35rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                    }}
+                  >
+                    <Activity size={13} />
+                    3. Information Contributed to QRS Detection
+                  </div>
+                  <div style={{ color: '#e2e8f0' }}>{currentStageInfo.detectionContribution}</div>
+                </div>
+              </div>
+
+              {/* Numerical Settings & Parameters */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+                  gap: '0.5rem',
+                  background: 'rgba(15, 23, 42, 0.6)',
+                  padding: '0.65rem 0.8rem',
+                  borderRadius: '8px',
+                  border: '1px solid rgba(51, 65, 85, 0.4)',
+                }}
+              >
+                {currentSettings.map((setting, i) => (
+                  <div key={i}>
+                    <div
+                      style={{
+                        fontSize: '0.68rem',
+                        color: '#94a3b8',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.03em',
+                      }}
+                    >
+                      {setting.label}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: '0.8rem',
+                        fontWeight: 600,
+                        color: '#f8fafc',
+                        marginTop: '0.15rem',
+                      }}
+                    >
+                      {setting.value}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Special Visual Demonstration for the Moving-Window Integration Stage */}
+              {activeStage === 'integrated' && (
+                <div
+                  style={{
+                    background: 'rgba(16, 185, 129, 0.08)',
+                    border: '1px solid rgba(16, 185, 129, 0.35)',
+                    borderRadius: '8px',
+                    padding: '0.75rem 0.9rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.45rem',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: '0.5rem',
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: '0.8rem',
+                        fontWeight: 700,
+                        color: '#10b981',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.4rem',
+                      }}
+                    >
+                      <Sliders size={14} />
+                      Visual Moving-Window Specification: {windowSize} ms Duration
+                    </span>
+                    <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                      Window width N = round({windowSize} ms / 1000 × {fs} Hz) = {Math.round((windowSize / 1000) * fs)} samples
+                    </span>
+                  </div>
+
+                  {/* Window Graphic Bar */}
+                  <div
+                    style={{
+                      position: 'relative',
+                      height: '24px',
+                      background: 'rgba(15, 23, 42, 0.8)',
+                      borderRadius: '6px',
+                      border: '1px solid rgba(51, 65, 85, 0.6)',
+                      overflow: 'hidden',
+                      display: 'flex',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: `${Math.min(100, Math.max(10, (windowSize / 200) * 100))}%`,
+                        height: '100%',
+                        background: 'linear-gradient(90deg, rgba(16, 185, 129, 0.25), rgba(16, 185, 129, 0.6))',
+                        borderRight: '2px solid #10b981',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '0.72rem',
+                        fontWeight: 700,
+                        color: '#ffffff',
+                        letterSpacing: '0.04em',
+                      }}
+                    >
+                      Sliding Integrator Window [{windowSize} ms • {Math.round((windowSize / 1000) * fs)} samples]
+                    </div>
+                  </div>
+
+                  <div style={{ fontSize: '0.71rem', color: '#94a3b8', lineHeight: 1.35 }}>
+                    <strong>Scientific Provenance Note:</strong> The moving-window integrator consolidates multiple slope spikes
+                    into an integrated pulse envelope. Dual adaptive thresholds determine QRS timing from this envelope.
+                    Individual Q, R, and S landmarks are <em>not</em> produced by this integrated waveform; they are delineated
+                    downstream from the original ECG signal morphology.
+                  </div>
+                </div>
+              )}
+            </div>
           </section>
         </main>
 
-        {/* ───────────────────────── Right 3D heart ───────────────────────── */}
+        {/* ───────────────────────── Right 3D Heart Column ───────────────────────── */}
         <section
           className="card"
           style={{
@@ -1422,27 +1892,6 @@ function App() {
             >
               Live 3D Cardiac Conduction
             </span>
-
-            {/* <button
-              type="button"
-              aria-label="Expand heart viewer"
-              title="Expand heart viewer"
-              style={{
-                pointerEvents: 'auto',
-                width: 34,
-                height: 34,
-                borderRadius: 10,
-                border: '1px solid rgba(148,163,184,0.45)',
-                background: 'rgba(15,23,42,0.78)',
-                color: '#e2e8f0',
-                display: 'grid',
-                placeItems: 'center',
-                cursor: 'pointer',
-              }}
-              onClick={() => {}}
-            >
-              <Maximize2 size={17} />
-            </button> */}
           </div>
 
           <div style={{ flex: 1, minHeight: 0 }}>
@@ -1457,22 +1906,13 @@ function App() {
               <ambientLight intensity={1.15} />
               <directionalLight position={[5, 10, 7]} intensity={1.8} />
               <directionalLight position={[-5, -5, -3]} intensity={0.75} />
-              <pointLight
-                position={[0, 2, 4]}
-                intensity={1.35}
-                color="#ffffff"
-              />
+              <pointLight position={[0, 2, 4]} intensity={1.35} color="#ffffff" />
 
               <Suspense
                 fallback={
                   <mesh>
                     <sphereGeometry args={[0.7, 16, 16]} />
-                    <meshStandardMaterial
-                      color="#b91c1c"
-                      wireframe
-                      transparent
-                      opacity={0.3}
-                    />
+                    <meshStandardMaterial color="#b91c1c" wireframe transparent opacity={0.3} />
                   </mesh>
                 }
               >
@@ -1512,7 +1952,7 @@ function App() {
         </section>
       </div>
 
-      {/* Small-screen fallback */}
+      {/* Responsive layout overrides */}
       <style>{`
         @media (max-width: 1200px) {
           .dashboard-grid {

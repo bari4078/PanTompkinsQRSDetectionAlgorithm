@@ -9,17 +9,20 @@ export function usePlaybackEngine({ fs, rPeaks, duration }) {
   const engineRef = useRef(null);
   const rafRef = useRef(null);
   const lastTimeRef = useRef(null);
-  
+
   const [state, setState] = useState(() => {
     engineRef.current = new PlaybackEngine({ fs, rPeaks, duration });
     return engineRef.current.getState();
   });
+
+  const rPeaksKey = Array.isArray(rPeaks) ? rPeaks.join(',') : '';
 
   // Re-initialize engine if config changes
   useEffect(() => {
     engineRef.current = new PlaybackEngine({ fs, rPeaks, duration });
     setState(engineRef.current.getState());
   }, [fs, rPeaks, duration]);
+  }, [fs, rPeaksKey, duration]);
 
   const tick = useCallback((timestamp) => {
     if (lastTimeRef.current != null) {
@@ -27,7 +30,7 @@ export function usePlaybackEngine({ fs, rPeaks, duration }) {
       engineRef.current.tick(deltaSec);
       setState(engineRef.current.getState());
     }
-    
+
     lastTimeRef.current = timestamp;
     if (engineRef.current.getState().isPlaying) {
       rafRef.current = requestAnimationFrame(tick);
@@ -48,7 +51,7 @@ export function usePlaybackEngine({ fs, rPeaks, duration }) {
       }
       lastTimeRef.current = null;
     }
-    
+
     return () => {
       if (rafRef.current) {
         cancelAnimationFrame(rafRef.current);
