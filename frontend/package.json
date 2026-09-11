@@ -13,11 +13,16 @@
   "dependencies": {
     "@react-three/drei": "^10.7.8",
     "@react-three/fiber": "^9.7.0",
+    "katex": "^0.18.7",
     "lucide-react": "^1.34.0",
     "plotly.js": "^4.0.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "react-markdown": "^10.1.0",
     "react-plotly.js": "^4.1.0",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
     "three": "^0.185.1"
   },
   "devDependencies": {
