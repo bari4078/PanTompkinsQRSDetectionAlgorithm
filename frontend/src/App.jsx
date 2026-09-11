@@ -277,11 +277,11 @@ function App() {
           className="card"
           style={{
             ...cardStyle,
-            padding: '1.2rem',
+            padding: '1rem',
             alignSelf: 'stretch',
             display: 'flex',
             flexDirection: 'column',
-            gap: '1rem',
+            gap: '0.5rem',
           }}
         >
           <div>
@@ -440,7 +440,7 @@ function App() {
               className="metric-card"
               style={{
                 ...cardStyle,
-                minHeight: 118,
+                minHeight: 100,
                 padding: '1.05rem 1.15rem',
                 textAlign: 'left',
               }}
@@ -452,7 +452,7 @@ function App() {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'flex-start',
-                  gap: '0.55rem',
+                  gap: '0.6rem',
                 }}
               >
                 <Heart size={25} color="#ef4444" />
@@ -464,7 +464,7 @@ function App() {
               className="metric-card"
               style={{
                 ...cardStyle,
-                minHeight: 118,
+                minHeight: 100,
                 padding: '1.05rem 1.15rem',
                 textAlign: 'left',
               }}
@@ -488,8 +488,8 @@ function App() {
               className="metric-card"
               style={{
                 ...cardStyle,
-                minHeight: 118,
-                padding: '1.05rem 1.15rem',
+                minHeight: 100,
+                padding: '1.05rem 1rem',
                 textAlign: 'left',
               }}
             >
