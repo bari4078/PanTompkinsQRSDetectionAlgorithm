@@ -316,7 +316,7 @@ Executes the Pan-Tompkins pipeline and arrhythmia diagnostic engine on a specifi
 
 
 ## Project Developed by:
-- Abid M Bari
+- Abid Mahbub Bari
 - Shadman Shahriar Shuvo
 
 
